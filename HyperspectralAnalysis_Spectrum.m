@@ -1144,6 +1144,21 @@ while ne(scelta_menu,22)
 
             fprintf(['\n\n   Size: ',num2str(a),' x ',num2str(b),' pixels']);
 
+            if ne(aLambert,a)||ne(bLambert,b)
+
+                settings_file_name = strcat(filename_Hyper(1:end-21),"Settings.mat");
+                settings_file = load(fullfile(pathname_Hyper,settings_file_name));
+
+                x_limits = settings_file.settings.x_limits;
+                y_limits = settings_file.settings.y_limits;
+                Hyperspectrum_cubeLambert = Hyperspectrum_cubeLambert(y_limits(1):y_limits(2)+1, x_limits(1):x_limits(2)+1, :);
+
+                [aLambert,bLambert]=size(Hyperspectrum_cubeLambert(:,:,1));
+
+                fprintf(['\n\n   New Size of Lambertian Hypercube: ',num2str(aLambert),' x ',num2str(bLambert),' pixels']);
+            end;
+
+           
             if ne(ccLambert,cc)
 
                 uiwait(msgbox('Numebr of spectral points is different. Aborting',...
