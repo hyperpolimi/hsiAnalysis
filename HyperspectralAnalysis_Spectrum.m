@@ -315,10 +315,9 @@ set(gca,'YDir','reverse')
 scelta_menu = menu('Choose analysis',...
     'Remove BKG from ROI','Intensity levels','Gamma correction','Rotate',...
     'Generate False-RGB map','RGB white balance','Spectrum on area',...
-    'Save spectral GIF',...
     'Spectral Angle Mapping','Clean Graphs','Reflectivity map',...
     'Transmission map ','Normalize on Lambertian','Crop/Smoothing',...
-    'Map Spectral Peaks','Plot Hypercube','Hypercube derivative',...
+    'Map Spectral Peaks','Plot Hypercube','Hypercube derivative','Save spectral GIF',...
     'Save Spectra','Save current image','Save current Hypercube','Calibrated RGB',...
     'EXIT' );
 
@@ -339,7 +338,225 @@ while ne(scelta_menu,22)
     end
 
     switch scelta_menu
-        case 1  % Stretch RGB colormap
+        case 1 %Remove BKG from ROI
+            Select_ROI_BKG;
+
+            h=waitbar(0,'Removing Background');
+            for yy=1:a
+                waitbar(yy/a,h);
+                for xx=1:b
+                    Hyperspectrum_cube(yy,xx,:)=squeeze(Hyperspectrum_cube(yy,xx,:))-BKG_Ave; % Can be real or complex, works both ways
+                    Spectrum=squeeze(Hyperspectrum_cube(yy,xx,:));
+                    %
+                    %                     ImmagineRGB(yy,xx,1)=R_THz*Spectrum; % R
+                    %                     ImmagineRGB(yy,xx,2)=G_THz*Spectrum; % G
+                    %                     ImmagineRGB(yy,xx,3)=B_THz*Spectrum; % B
+                    %
+                end;
+            end;
+
+            close (h);
+
+            Intens=sum(abs(Hyperspectrum_cube),3); %**Benedetto** abs 09/10/2020
+
+            ImmagineRGB(:,:,1)=Intens;
+            ImmagineRGB(:,:,2)=Intens;
+            ImmagineRGB(:,:,3)=Intens;
+
+            max_image=max(max(max(ImmagineRGB)));
+            subplot(h1);
+            image((abs(ImmagineRGB./max_image-black)/saturation).^gamma); % era image(abs(ImmagineRGB./max_image)); **Benedetto** 18/11/2020
+            axis equal;
+            set(gca,'YDir','reverse')
+
+            %             [filename_Spectra, pathname_Spectra] = uiputfile('*.mat', 'Save new Hypercube as',dir2);
+            %             file_totBKG=[pathname_Spectra,filename_Spectra];
+            %
+            %             h=waitbar(0.5,'Saving new Hypercube, please wait...');
+            %
+            %             fprintf(['\n  -- Saving new spectral image in ',file_totBKG,' --\n']);
+            %             save(file_totBKG,'f','fr_real','Hyperspectrum_cube'); % R/T Spectra
+            %
+            %             close(h);
+
+        case 2 %Intensity levels
+            ImmagineRGB(isnan(ImmagineRGB))=0;
+
+            max_image=max(max(max(ImmagineRGB)));
+
+            [COUNTSr,Xr]=imhist(ImmagineRGB(:,:,1)./max_image,2^11);
+            [COUNTSg,Xg]=imhist(ImmagineRGB(:,:,2)./max_image,2^11);
+            [COUNTSb,Xb]=imhist(ImmagineRGB(:,:,3)./max_image,2^11);
+            histo=figure;
+            plot(Xr(1:end-1),COUNTSr(1:end-1),'r',...
+                Xg(1:end-1),COUNTSg(1:end-1),'g',...
+                Xb(1:end-1),COUNTSb(1:end-1),'b','linewidth',3); axis tight; %era semilogy
+            grid on;
+
+            title('Intensity Hystogram');
+            legend('R','G','B');
+
+            uiwait(msgbox('ZOOM x-axis to adjust levels, then ENTER',...
+                'Adjust intensity levels','warn'));
+
+            zoom xon;
+            pause;
+            zoom off;
+
+            V=axis;
+            close(histo);
+
+            black=V(1); if black<0, black=0; end;
+            saturation=V(2);
+
+            cla(h1);
+
+            h1=subplot('position',[0.05 0.05 0.5 1],'Colororder',mm);
+            hold all; axis off;
+
+            % subplot(h1);
+
+            image((abs(ImmagineRGB./max_image-black)/saturation).^gamma);
+            axis equal;
+            set(gca,'YDir','reverse')
+
+
+        case 3 %Gamma correction
+            prompt={'Gamma value'};
+            name='Select gamma value';
+            numlines=1;
+            defaultanswer={'1'};
+
+            options.Resize='on';
+            options.WindowStyle='normal';
+            options.Interpreter='tex';
+
+            answer=inputdlg(prompt,name,numlines,defaultanswer,options);
+            gamma=str2num(cell2mat(answer));
+            max_image=max(max(max(ImmagineRGB)));
+
+            cla(h1);
+
+            h1=subplot('position',[0.05 0.05 0.5 1],'Colororder',mm);
+            hold all; axis off;
+
+            % subplot(h1);
+
+            image((abs(ImmagineRGB./max_image-black)/saturation).^gamma);
+            title(['Gamma = ',num2str(gamma)]);
+            axis equal;
+            set(gca,'YDir','reverse')
+
+
+
+        case 4 %Rotate
+            figure(main);
+            % cla(h1);
+            subplot(h1);
+
+            %**Benedetto** 26/09/2020
+            scelta_rotazione=menu('Choose rotation', ...
+                '90deg clock','90deg counterclock','180deg','custom (select angle)','custom (draw line)');
+            switch scelta_rotazione
+                case 1 %90deg clock
+                    angle=90; %90deg clockwise
+
+                case 2 %90deg counterclock
+                    angle=-90; %90deg counterclockwise
+
+                case 3 %180deg
+                    angle=180;
+
+                case 4 %custom (select angle)
+                    prompt={'Select rotation angle (+: clock, -: counterclock)'};
+                    name='Select rotation angle';
+                    numlines=1;
+                    defaultanswer={num2str(0)};
+
+                    options.Resize='on';
+                    options.WindowStyle='normal';
+                    options.Interpreter='tex';
+
+                    answer=inputdlg(prompt,name,numlines,defaultanswer,options);
+                    angle=str2double(cell2mat(answer));
+
+                case 5 %custom (draw line)
+                    uiwait(msgbox('Draw reference direction line, then DOUBLE CLICK',...
+                        'Hypercube Rotation','warn'));
+
+                    V=axis;
+
+                    h_line = imline;
+                    %             fcn = makeConstrainToRectFcn('imrect',get(gca,'XLim'),get(gca,'YLim'));
+                    %             setPositionConstraintFcn(h_line,fcn);
+
+                    position = wait(h_line);
+
+                    ButtonName = questdlg('Align to:', ...
+                        'Rotation', ...
+                        'Vertical  ', 'Horizontal', 'Vertical  ');
+
+                    ratio=( position(2,2)-position(1,2) )/( position(2,1)-position(1,1) );
+
+                    if ButtonName=='Horizontal'
+                        angle=atan(ratio)*180/pi;
+                    else
+                        angle=-atan(1/ratio)*180/pi;
+                    end
+
+            end
+            %**Benedetto** 26/09/2020
+
+            B = imrotate(Intens,angle,'bilinear');
+
+            Hyperspectrum_cubeOriginal=Hyperspectrum_cube;
+
+            [a,b]=size(B); % New size
+            Hyperspectrum_cube=zeros(a,b,cc);
+
+            h=waitbar(0,'Rotating hypercube');
+
+            for hr=1:cc % Rotation of all spectra
+                waitbar(hr/cc,h);
+                Hyperspectrum_cube(:,:,hr) = imrotate(Hyperspectrum_cubeOriginal(:,:,hr),angle,'bilinear');
+            end;
+
+            close(h);
+
+            %**Benedetto**
+            if ne(RGB_flag,0) %if the user has used at least one time the RGB map generation tool, after the rotation I need to re-generate the same RGB map choice
+
+                ImmagineRGB_old=ImmagineRGB;
+                ImmagineRGB=[];
+
+                h=waitbar(0,'Rotating RGB image');
+                for hr=1:3 % Rotation of RGB
+                    waitbar(hr/3,h);
+                    ImmagineRGB(:,:,hr) = imrotate(ImmagineRGB_old(:,:,hr),angle,'bilinear');
+                end;
+
+                close(h);
+
+
+            else
+
+                Intens=sum(Hyperspectrum_cube,3);
+                ImmagineRGB=zeros(a,b,3);
+                ImmagineRGB(:,:,1)=Intens;
+                ImmagineRGB(:,:,2)=Intens;
+                ImmagineRGB(:,:,3)=Intens;
+
+            end;
+            %**Benedetto**
+
+            max_image=max(max(max(ImmagineRGB)));
+            subplot(h1);
+            image((abs(ImmagineRGB./max_image-black)/saturation).^gamma); % era image(abs(ImmagineRGB./max_image)); **Benedetto** 18/11/2020
+            axis equal;
+            set(gca,'YDir','reverse')
+
+
+        case 5  % Stretch RGB colormap
             RGB_flag=1; %the user has generated at least one time the RGB map **Benedetto**
 
             % From Spectral_filter
@@ -479,9 +696,123 @@ while ne(scelta_menu,22)
                     xline(waveB, 'b--', 'B', 'LineWidth',1.5);
             end
             hold all;
+        case 6 %RGB white balance
+
+            black=0; saturation=1; gamma=1; %the image plot parameters are re-setted to the initial ones **Benedetto** 16/11/2020
+
+            %**Benedetto** 24/06/2021 Code modification: possibility to perform the white
+            %balance with values set by the user and specification of the
+            %spectralon reflectivity value
+            uiwait(msgbox('The parameters (black, saturation and gamma) have been set to the initial values.','RGB white balance','warn'));
+
+            RGBwhiteBalance_Source=menu('RGB white balance source', 'Select ROI from image','Set the RGB white values');
+
+            switch RGBwhiteBalance_Source
+                case 1
+                    uiwait(msgbox('Select now a ROI for RGB white balance.','RGB white balance','warn'));
+                    Select_ROI_RGB;
+                    uiwait(msgbox(sprintf('The selected RGB values for the normalization are: \n\nnorm_R=%2.3g\nnorm_G=%2.3g\nnorm_B=%2.3g\n',norm_R,norm_G,norm_B),'warn'));
+                case 2
+                    prompt={'norm\_R','norm\_G','norm\_B'};
+                    name='Set values for the image normalization in white balance';
+                    numlines=1;
+                    defaultanswer={num2str(1),num2str(1),num2str(1)};
+
+                    options.Resize='on';
+                    options.WindowStyle='normal';
+                    options.Interpreter='tex';
+
+                    answer=inputdlg(prompt,name,numlines,defaultanswer,options);
+                    norm_R=str2double(cell2mat(answer(1)));
+                    norm_G=str2double(cell2mat(answer(2)));
+                    norm_B=str2double(cell2mat(answer(3)));
+
+            end
 
 
-        case 2 % Select_spectra: Selects spectrum from ROI
+            prompt={'Set pure white value','Specify Spectralon reflectivity value (from 0 [black] to 1 [white])'};
+            name='Select value to attribute to pure white';
+            numlines=1;
+            defaultanswer={num2str(0.8),num2str(1)};
+
+            options.Resize='on';
+            options.WindowStyle='normal';
+            options.Interpreter='tex';
+
+            answer=inputdlg(prompt,name,numlines,defaultanswer,options);
+            whiteValue=str2double(cell2mat(answer(1))); %white level as defined by the user
+            Reflectivity_value=str2double(cell2mat(answer(2))); %spectralon reflectivity value
+
+            norm_R=norm_R./Reflectivity_value;
+            norm_G=norm_G./Reflectivity_value;
+            norm_B=norm_B./Reflectivity_value;
+
+            ImmagineRGB_R=ImmagineRGB(:,:,1)/norm_R.*whiteValue; % R
+            ImmagineRGB_G=ImmagineRGB(:,:,2)/norm_G.*whiteValue; % G
+            ImmagineRGB_B=ImmagineRGB(:,:,3)/norm_B.*whiteValue; % B
+
+            noSaturation_R=ones(size(ImmagineRGB_R));
+            noSaturation_G=ones(size(ImmagineRGB_G));
+            noSaturation_B=ones(size(ImmagineRGB_B));
+
+            noSaturation_R(ImmagineRGB_R>1)=0; %R
+            noSaturation_G(ImmagineRGB_G>1)=0; %G
+            noSaturation_B(ImmagineRGB_B>1)=0; %B
+            %noSaturation matrix (for each R, G and B) has 0 in correspondent saturated
+            %values position in ImmagineRGB
+            %the product noSaturation_R.*noSaturation_G.*noSaturation_B has 0 in all
+            %positions in which at least one R, G or B is saturated
+
+            noSaturation_product=noSaturation_R.*noSaturation_G.*noSaturation_B;
+
+            ImmagineRGB_R(noSaturation_product==0)=1; %R
+            ImmagineRGB_G(noSaturation_product==0)=1; %G
+            ImmagineRGB_B(noSaturation_product==0)=1; %B
+            %all pixels [R,G,B] with R>1 || G>1 || B>1 have been put to [1,1,1]
+
+            ImmagineRGB(:,:,1)=ImmagineRGB_R;
+            ImmagineRGB(:,:,2)=ImmagineRGB_G;
+            ImmagineRGB(:,:,3)=ImmagineRGB_B;
+
+            max_image=max(max(max(ImmagineRGB))); %**Benedetto** 16/11/2020
+
+            cla(h1);
+
+            h1=subplot('position',[0.05 0.05 0.5 1],'Colororder',mm);
+            hold all; axis off;
+
+            % subplot(h1);
+
+            image((abs(ImmagineRGB./max_image-black)/saturation).^gamma);
+            axis equal;
+            set(gca,'YDir','reverse')
+
+            %SaturatedPixelsImage map is created in grey levels (integral
+            %R+G+B is put in each one of R, G and B)
+            SaturatedPixelsImage_R=(ImmagineRGB_R+ImmagineRGB_G+ImmagineRGB_B)./max(max(ImmagineRGB_R+ImmagineRGB_G+ImmagineRGB_B)); %R
+            SaturatedPixelsImage_G=SaturatedPixelsImage_R; %G
+            SaturatedPixelsImage_B=SaturatedPixelsImage_R; %B
+            %saturated pixels are set in red
+            SaturatedPixelsImage_R(noSaturation_product==0)=1; %R
+            SaturatedPixelsImage_G(noSaturation_product==0)=0; %G
+            SaturatedPixelsImage_B(noSaturation_product==0)=0; %B
+
+            SaturatedPixelsImage(:,:,1)=SaturatedPixelsImage_R;
+            SaturatedPixelsImage(:,:,2)=SaturatedPixelsImage_G;
+            SaturatedPixelsImage(:,:,3)=SaturatedPixelsImage_B;
+
+            hSaturatedPixels=figure;
+            image(SaturatedPixelsImage);
+            axis equal;
+            title('Saturated pixels map. Press ENTER to continue.');
+            pause;
+            close(hSaturatedPixels);
+            clear ImmagineRGB_R ImmagineRGB_G ImmagineRGB_B;
+            clear noSaturation_R noSaturation_G noSaturation_B;
+            clear noSaturation_product SaturatedPixelsImage_R SaturatedPixelsImage_G SaturatedPixelsImage_B
+
+
+        case 7 % Select_spectra: Selects spectrum from ROI
             aspectRatio=2000;
             width=1;
             height=1;
@@ -535,7 +866,135 @@ while ne(scelta_menu,22)
                 fprintf(['\n   Selected: ',num2str(cont),' pixels\n']);
             end
 
-        case 3
+        case 8 % Spectral angle Mapping
+
+            %**Benedetto** also possibility to load an external spectrum
+            %as reference  06/11/2020
+            spectrum_ref_Source=menu('Choose reference spectrum', 'Spectrum from ROI', 'Load external spectrum');
+
+            switch spectrum_ref_Source
+                case 1
+                    uiwait(msgbox('Select ROI for reference spectrum','Spectral Angle Mapping','warn'));
+
+                    [~,~,Spectrum_Ref,~,cont]=Select_spectra_ROI_simple; %**Benedetto** (aggiunta di cont)
+                case 2
+                    uiwait(msgbox('The external spectrum has to be a .txt file with the first column representing the frequency and the second column representing the intensity; other columns will be neglected.',...
+                        'External spectrum file format','warn'));
+                    [filename_spectrum_ref, pathname_spectrum_ref] = uigetfile('*.txt', 'Load saved spectra');
+                    file_tot_spectrum_ref=[pathname_spectrum_ref,filename_spectrum_ref];
+
+                    try %files with only numeric values
+                        input_data_spectrum_ref = load(file_tot_spectrum_ref);
+                    catch %files with headers imported as structures; "data" field with numeric values
+                        dataStruct = importdata(file_tot_spectrum_ref);
+                        input_data_spectrum_ref = dataStruct.data;
+                    end
+                    Spectrum_Ref=input_data_spectrum_ref(:,2);
+                    fr_real_Ref=input_data_spectrum_ref(:,1);
+                    Spectrum_Ref=interp1(fr_real_Ref,Spectrum_Ref,fr_real); Spectrum_Ref(isnan(Spectrum_Ref)) = 0;
+                    Spectrum_Ref=Spectrum_Ref';
+
+                    clear input_data_spectrum_ref;
+
+                    Raman_option=menu('Specify external spectrum type', 'Raman', 'Other');
+                    if Raman_option==1
+                        uiwait(msgbox('If the loaded extenal spectrum is a Raman spectrum it has to be shifted in frequency depending on the difference of its pump laser with respect to the current measurement pump laser.',...
+                            'Warning for Raman measurements','warn'));
+                        prompt={'External spectrum pump laser wavelength [nm]','Current measurement spectrum pump laser wavelength [nm]'};
+                        name='Select pump laser wavelengths';
+                        numlines=1;
+                        defaultanswer={num2str(780),num2str(780)};
+                        options.Resize='on';
+                        options.WindowStyle='normal';
+                        options.Interpreter='tex';
+
+                        answer=inputdlg(prompt,name,numlines,defaultanswer,options);
+                        pump_laser_1=str2double(cell2mat(answer(1)));
+                        pump_laser_2=str2double(cell2mat(answer(2)));
+                        %shift of the external spectrum
+                        fr_real_Ref=fr_real_Ref+c.*(pump_laser_1-pump_laser_2)./(pump_laser_1.*pump_laser_2).*1e9./1e12;
+                    end
+            end
+
+            prompt={'Lower wavelength (nm)','Higher wavelength (nm)'};
+            name='Select spectral band for SAM';
+            numlines=1;
+            switch spectrum_ref_Source
+                case 1
+                    defaultanswer={num2str(c/(max(fr_real)*1e12)/1e-9),num2str(c/(min(fr_real)*1e12)/1e-9)};
+                case 2 %if I have loaded an external spectrum the extremes of the band must be included in both current and external spectra
+                    defaultanswer={num2str(c/(min(max(fr_real_Ref),max(fr_real))*1e12)/1e-9),num2str(c/(max(min(fr_real_Ref),min(fr_real))*1e12)/1e-9)};
+            end
+            options.Resize='on';
+            options.WindowStyle='normal';
+            options.Interpreter='tex';
+
+            answer=inputdlg(prompt,name,numlines,defaultanswer,options);
+            lmSAM(1)=str2double(cell2mat(answer(1)));
+            lmSAM(2)=str2double(cell2mat(answer(2)));
+
+            f_range(1)=c./(lmSAM(1)*1e-9)/1e12;
+            f_range(2)=c./(lmSAM(2)*1e-9)/1e12;
+            f_range=sort(f_range);
+
+            Index=fr_real>f_range(1) & fr_real<f_range(2);
+
+            theta=zeros(a,b);
+
+            h=waitbar(0,'Generating Spectral Angle Mapping');
+            for yy=1:a
+                waitbar(yy/a,h);
+                for xx=1:b
+                    Spectrum=abs(squeeze(Hyperspectrum_cube(yy,xx,Index))); %**Benedetto** abs 09/10/2020
+                    theta(yy,xx)=acos( (Spectrum_Ref(Index)'*Spectrum) / sqrt(sum(Spectrum_Ref(Index).^2)*sum(Spectrum.^2)) )*180/pi;
+
+                end
+            end
+
+            close (h);
+
+            figure;
+            imagesc(theta);
+            col=colormap(gray(256)); col=flipud(col); colormap(col); colorbar;
+            title('Spectral Angle Mapping (deg)  -  To change angle limits: Edit -> Colormap...');
+            axis equal; axis off;
+
+        case 9 %Clean graphs
+
+            figure(main);
+            cla(h1);
+
+            h1=subplot('position',[0.05 0.05 0.5 1],'Colororder',mm);
+            hold all; axis off;
+
+            % subplot(h1);
+            image((abs(ImmagineRGB./max_image-black)/saturation).^gamma); % era image(abs(ImmagineRGB./max_image)); **Benedetto** 18/11/2020
+            axis equal;
+            set(gca,'YDir','reverse')
+
+            cla(h3);
+            h3=subplot(2,2,2,'visible','off','Colororder',mm);
+            % title('Spectra NOT corrected with Jacobian');
+            axh3.XLabel.String=Label_x;
+            axh3.YLabel.String='Intensity [arb.un.]';
+            axh3.Title.String='Spectra for selected regions'; % title('Spectra NOT corrected with Jacobian'); %250822
+            hold all; axis tight;
+
+
+            cla(h4);
+            h4=subplot(2,2,4,'visible','off','Colororder',mm);
+            % title('Spectra NOT corrected with Jacobian');
+            hold all; axis tight;
+            axh4.XLabel.String=Label_x;
+            axh4.YLabel.String='Intensity [arb.un.]';
+            % axh4.Title.String='Spectra normalised to the peak'; % title('Spectra NOT corrected with Jacobian');
+            axh4.Title.String='Spectra normalised to the area'; %251021
+
+            num_spectrum=0;
+            Spectrum_subAve=[];
+            Spectrum_subStd=[];
+
+        case 10
             %**Benedetto** 24/06/2021 also possibility to load an external spectrum
             %as white reference for Reflectivity Map generation and
             %possibility to specify the reflectivity value of spectralon
@@ -658,383 +1117,12 @@ while ne(scelta_menu,22)
 
             CalculateR;
 
-        case 4
+        case 11
             uiwait(msgbox('Select ROI for reference spectrum','Transmission map','warn'));
             Select_ROI;
             CalculateT;
 
-        case 5  % rotate
-
-            figure(main);
-            % cla(h1);
-            subplot(h1);
-
-            %**Benedetto** 26/09/2020
-            scelta_rotazione=menu('Choose rotation', ...
-                '90deg clock','90deg counterclock','180deg','custom (select angle)','custom (draw line)');
-            switch scelta_rotazione
-                case 1 %90deg clock
-                    angle=90; %90deg clockwise
-
-                case 2 %90deg counterclock
-                    angle=-90; %90deg counterclockwise
-
-                case 3 %180deg
-                    angle=180;
-
-                case 4 %custom (select angle)
-                    prompt={'Select rotation angle (+: clock, -: counterclock)'};
-                    name='Select rotation angle';
-                    numlines=1;
-                    defaultanswer={num2str(0)};
-
-                    options.Resize='on';
-                    options.WindowStyle='normal';
-                    options.Interpreter='tex';
-
-                    answer=inputdlg(prompt,name,numlines,defaultanswer,options);
-                    angle=str2double(cell2mat(answer));
-
-                case 5 %custom (draw line)
-                    uiwait(msgbox('Draw reference direction line, then DOUBLE CLICK',...
-                        'Hypercube Rotation','warn'));
-
-                    V=axis;
-
-                    h_line = imline;
-                    %             fcn = makeConstrainToRectFcn('imrect',get(gca,'XLim'),get(gca,'YLim'));
-                    %             setPositionConstraintFcn(h_line,fcn);
-
-                    position = wait(h_line);
-
-                    ButtonName = questdlg('Align to:', ...
-                        'Rotation', ...
-                        'Vertical  ', 'Horizontal', 'Vertical  ');
-
-                    ratio=( position(2,2)-position(1,2) )/( position(2,1)-position(1,1) );
-
-                    if ButtonName=='Horizontal'
-                        angle=atan(ratio)*180/pi;
-                    else
-                        angle=-atan(1/ratio)*180/pi;
-                    end
-
-            end
-            %**Benedetto** 26/09/2020
-
-            B = imrotate(Intens,angle,'bilinear');
-
-            Hyperspectrum_cubeOriginal=Hyperspectrum_cube;
-
-            [a,b]=size(B); % New size
-            Hyperspectrum_cube=zeros(a,b,cc);
-
-            h=waitbar(0,'Rotating hypercube');
-
-            for hr=1:cc % Rotation of all spectra
-                waitbar(hr/cc,h);
-                Hyperspectrum_cube(:,:,hr) = imrotate(Hyperspectrum_cubeOriginal(:,:,hr),angle,'bilinear');
-            end;
-
-            close(h);
-
-            %**Benedetto**
-            if ne(RGB_flag,0) %if the user has used at least one time the RGB map generation tool, after the rotation I need to re-generate the same RGB map choice
-
-                ImmagineRGB_old=ImmagineRGB;
-                ImmagineRGB=[];
-
-                h=waitbar(0,'Rotating RGB image');
-                for hr=1:3 % Rotation of RGB
-                    waitbar(hr/3,h);
-                    ImmagineRGB(:,:,hr) = imrotate(ImmagineRGB_old(:,:,hr),angle,'bilinear');
-                end;
-
-                close(h);
-
-
-            else
-
-                Intens=sum(Hyperspectrum_cube,3);
-                ImmagineRGB=zeros(a,b,3);
-                ImmagineRGB(:,:,1)=Intens;
-                ImmagineRGB(:,:,2)=Intens;
-                ImmagineRGB(:,:,3)=Intens;
-
-            end;
-            %**Benedetto**
-
-            max_image=max(max(max(ImmagineRGB)));
-            subplot(h1);
-            image((abs(ImmagineRGB./max_image-black)/saturation).^gamma); % era image(abs(ImmagineRGB./max_image)); **Benedetto** 18/11/2020
-            axis equal;
-            set(gca,'YDir','reverse')
-
-        case 6
-            Generate_GIF;
-
-        case 7 % Selects BKG spectrum from ROI
-            Select_ROI_BKG;
-
-            h=waitbar(0,'Removing Background');
-            for yy=1:a
-                waitbar(yy/a,h);
-                for xx=1:b
-                    Hyperspectrum_cube(yy,xx,:)=squeeze(Hyperspectrum_cube(yy,xx,:))-BKG_Ave; % Can be real or complex, works both ways
-                    Spectrum=squeeze(Hyperspectrum_cube(yy,xx,:));
-                    %
-                    %                     ImmagineRGB(yy,xx,1)=R_THz*Spectrum; % R
-                    %                     ImmagineRGB(yy,xx,2)=G_THz*Spectrum; % G
-                    %                     ImmagineRGB(yy,xx,3)=B_THz*Spectrum; % B
-                    %
-                end;
-            end;
-
-            close (h);
-
-            Intens=sum(abs(Hyperspectrum_cube),3); %**Benedetto** abs 09/10/2020
-
-            ImmagineRGB(:,:,1)=Intens;
-            ImmagineRGB(:,:,2)=Intens;
-            ImmagineRGB(:,:,3)=Intens;
-
-            max_image=max(max(max(ImmagineRGB)));
-            subplot(h1);
-            image((abs(ImmagineRGB./max_image-black)/saturation).^gamma); % era image(abs(ImmagineRGB./max_image)); **Benedetto** 18/11/2020
-            axis equal;
-            set(gca,'YDir','reverse')
-
-            %             [filename_Spectra, pathname_Spectra] = uiputfile('*.mat', 'Save new Hypercube as',dir2);
-            %             file_totBKG=[pathname_Spectra,filename_Spectra];
-            %
-            %             h=waitbar(0.5,'Saving new Hypercube, please wait...');
-            %
-            %             fprintf(['\n  -- Saving new spectral image in ',file_totBKG,' --\n']);
-            %             save(file_totBKG,'f','fr_real','Hyperspectrum_cube'); % R/T Spectra
-            %
-            %             close(h);
-
-        case 8 % Save spectra
-
-            % Saves the spectra of selected areas
-
-            % Saving selected spectra
-            [filename_Spectra, pathname_Spectra] = uiputfile('*.txt', 'Save Spectra as',dir2);
-            file_tot=[pathname_Spectra,filename_Spectra];
-
-            spectra_export=[fr_real' Spectrum_subAve Spectrum_subStd];
-
-            stringa=['  -- Saving Selected Spectra in ',file_tot,' --'];
-            fprintf('\n%s\n',stringa);
-            fprintf(['\n  Data format:\n\n    frequency[THz] (1 col)  Intensity[a.u.] Intensity_std[a.u.]\n\n']);
-
-            % Text file with header for columns % Martina 10.2025
-            % save(file_tot,'spectra_export','-ASCII'); % Selected Spectra
-            header = [{'Frequency [THz]'}, repmat({'Spectrum_Ave [a.u.]'}, 1, size(Spectrum_subAve, 2)), repmat({'Spectrum_Std [a.u.]'}, 1, size(Spectrum_subStd, 2))];
-            writecell(header, file_tot, 'Delimiter', '\t');
-            writematrix(spectra_export, file_tot, 'Delimiter', '\t', 'WriteMode', 'append');
-
-            saveas(main,[file_tot(1:end-3),'jpg'],'jpeg');
-
-        case 9 % Gamma correction
-
-            prompt={'Gamma value'};
-            name='Select gamma value';
-            numlines=1;
-            defaultanswer={'1'};
-
-            options.Resize='on';
-            options.WindowStyle='normal';
-            options.Interpreter='tex';
-
-            answer=inputdlg(prompt,name,numlines,defaultanswer,options);
-            gamma=str2num(cell2mat(answer));
-            max_image=max(max(max(ImmagineRGB)));
-
-            cla(h1);
-
-            h1=subplot('position',[0.05 0.05 0.5 1],'Colororder',mm);
-            hold all; axis off;
-
-            % subplot(h1);
-
-            image((abs(ImmagineRGB./max_image-black)/saturation).^gamma);
-            title(['Gamma = ',num2str(gamma)]);
-            axis equal;
-            set(gca,'YDir','reverse')
-
-
-        case 10 % Spectral angle Mapping
-
-            %**Benedetto** also possibility to load an external spectrum
-            %as reference  06/11/2020
-            spectrum_ref_Source=menu('Choose reference spectrum', 'Spectrum from ROI', 'Load external spectrum');
-
-            switch spectrum_ref_Source
-                case 1
-                    uiwait(msgbox('Select ROI for reference spectrum','Spectral Angle Mapping','warn'));
-
-                    [~,~,Spectrum_Ref,~,cont]=Select_spectra_ROI_simple; %**Benedetto** (aggiunta di cont)
-                case 2
-                    uiwait(msgbox('The external spectrum has to be a .txt file with the first column representing the frequency and the second column representing the intensity; other columns will be neglected.',...
-                        'External spectrum file format','warn'));
-                    [filename_spectrum_ref, pathname_spectrum_ref] = uigetfile('*.txt', 'Load saved spectra');
-                    file_tot_spectrum_ref=[pathname_spectrum_ref,filename_spectrum_ref];
-
-                    try %files with only numeric values
-                        input_data_spectrum_ref = load(file_tot_spectrum_ref);
-                    catch %files with headers imported as structures; "data" field with numeric values
-                        dataStruct = importdata(file_tot_spectrum_ref);
-                        input_data_spectrum_ref = dataStruct.data;
-                    end
-                    Spectrum_Ref=input_data_spectrum_ref(:,2);
-                    fr_real_Ref=input_data_spectrum_ref(:,1);
-                    Spectrum_Ref=interp1(fr_real_Ref,Spectrum_Ref,fr_real); Spectrum_Ref(isnan(Spectrum_Ref)) = 0;
-                    Spectrum_Ref=Spectrum_Ref';
-
-                    clear input_data_spectrum_ref;
-
-                    Raman_option=menu('Specify external spectrum type', 'Raman', 'Other');
-                    if Raman_option==1
-                        uiwait(msgbox('If the loaded extenal spectrum is a Raman spectrum it has to be shifted in frequency depending on the difference of its pump laser with respect to the current measurement pump laser.',...
-                            'Warning for Raman measurements','warn'));
-                        prompt={'External spectrum pump laser wavelength [nm]','Current measurement spectrum pump laser wavelength [nm]'};
-                        name='Select pump laser wavelengths';
-                        numlines=1;
-                        defaultanswer={num2str(780),num2str(780)};
-                        options.Resize='on';
-                        options.WindowStyle='normal';
-                        options.Interpreter='tex';
-
-                        answer=inputdlg(prompt,name,numlines,defaultanswer,options);
-                        pump_laser_1=str2double(cell2mat(answer(1)));
-                        pump_laser_2=str2double(cell2mat(answer(2)));
-                        %shift of the external spectrum
-                        fr_real_Ref=fr_real_Ref+c.*(pump_laser_1-pump_laser_2)./(pump_laser_1.*pump_laser_2).*1e9./1e12;
-                    end
-            end
-
-            prompt={'Lower wavelength (nm)','Higher wavelength (nm)'};
-            name='Select spectral band for SAM';
-            numlines=1;
-            switch spectrum_ref_Source
-                case 1
-                    defaultanswer={num2str(c/(max(fr_real)*1e12)/1e-9),num2str(c/(min(fr_real)*1e12)/1e-9)};
-                case 2 %if I have loaded an external spectrum the extremes of the band must be included in both current and external spectra
-                    defaultanswer={num2str(c/(min(max(fr_real_Ref),max(fr_real))*1e12)/1e-9),num2str(c/(max(min(fr_real_Ref),min(fr_real))*1e12)/1e-9)};
-            end
-            options.Resize='on';
-            options.WindowStyle='normal';
-            options.Interpreter='tex';
-
-            answer=inputdlg(prompt,name,numlines,defaultanswer,options);
-            lmSAM(1)=str2double(cell2mat(answer(1)));
-            lmSAM(2)=str2double(cell2mat(answer(2)));
-
-            f_range(1)=c./(lmSAM(1)*1e-9)/1e12;
-            f_range(2)=c./(lmSAM(2)*1e-9)/1e12;
-            f_range=sort(f_range);
-
-            Index=fr_real>f_range(1) & fr_real<f_range(2);
-
-            theta=zeros(a,b);
-
-            h=waitbar(0,'Generating Spectral Angle Mapping');
-            for yy=1:a
-                waitbar(yy/a,h);
-                for xx=1:b
-                    Spectrum=abs(squeeze(Hyperspectrum_cube(yy,xx,Index))); %**Benedetto** abs 09/10/2020
-                    theta(yy,xx)=acos( (Spectrum_Ref(Index)'*Spectrum) / sqrt(sum(Spectrum_Ref(Index).^2)*sum(Spectrum.^2)) )*180/pi;
-
-                end
-            end
-
-            close (h);
-
-            figure;
-            imagesc(theta);
-            col=colormap(gray(256)); col=flipud(col); colormap(col); colorbar;
-            title('Spectral Angle Mapping (deg)  -  To change angle limits: Edit -> Colormap...');
-            axis equal; axis off;
-
-        case 11
-
-            figure(main);
-            cla(h1);
-
-            h1=subplot('position',[0.05 0.05 0.5 1],'Colororder',mm);
-            hold all; axis off;
-
-            % subplot(h1);
-            image((abs(ImmagineRGB./max_image-black)/saturation).^gamma); % era image(abs(ImmagineRGB./max_image)); **Benedetto** 18/11/2020
-            axis equal;
-            set(gca,'YDir','reverse')
-
-            cla(h3);
-            h3=subplot(2,2,2,'visible','off','Colororder',mm);
-            % title('Spectra NOT corrected with Jacobian');
-            axh3.XLabel.String=Label_x;
-            axh3.YLabel.String='Intensity [arb.un.]';
-            axh3.Title.String='Spectra for selected regions'; % title('Spectra NOT corrected with Jacobian'); %250822
-            hold all; axis tight;
-
-
-            cla(h4);
-            h4=subplot(2,2,4,'visible','off','Colororder',mm);
-            % title('Spectra NOT corrected with Jacobian');
-            hold all; axis tight;
-            axh4.XLabel.String=Label_x;
-            axh4.YLabel.String='Intensity [arb.un.]';
-            % axh4.Title.String='Spectra normalised to the peak'; % title('Spectra NOT corrected with Jacobian');
-            axh4.Title.String='Spectra normalised to the area'; %251021
-
-            num_spectrum=0;
-            Spectrum_subAve=[];
-            Spectrum_subStd=[];
-
-        case 12 % Intensity levels
-
-            ImmagineRGB(isnan(ImmagineRGB))=0;
-
-            max_image=max(max(max(ImmagineRGB)));
-
-            [COUNTSr,Xr]=imhist(ImmagineRGB(:,:,1)./max_image,2^11);
-            [COUNTSg,Xg]=imhist(ImmagineRGB(:,:,2)./max_image,2^11);
-            [COUNTSb,Xb]=imhist(ImmagineRGB(:,:,3)./max_image,2^11);
-            histo=figure;
-            plot(Xr(1:end-1),COUNTSr(1:end-1),'r',...
-                Xg(1:end-1),COUNTSg(1:end-1),'g',...
-                Xb(1:end-1),COUNTSb(1:end-1),'b','linewidth',3); axis tight; %era semilogy
-            grid on;
-
-            title('Intensity Hystogram');
-            legend('R','G','B');
-
-            uiwait(msgbox('ZOOM x-axis to adjust levels, then ENTER',...
-                'Adjust intensity levels','warn'));
-
-            zoom xon;
-            pause;
-            zoom off;
-
-            V=axis;
-            close(histo);
-
-            black=V(1); if black<0, black=0; end;
-            saturation=V(2);
-
-            cla(h1);
-
-            h1=subplot('position',[0.05 0.05 0.5 1],'Colororder',mm);
-            hold all; axis off;
-
-            % subplot(h1);
-
-            image((abs(ImmagineRGB./max_image-black)/saturation).^gamma);
-            axis equal;
-            set(gca,'YDir','reverse')
-
-        case 13 % Normalize on Lambertian
+        case 12 % Normalize on Lambertian
 
             uiwait(msgbox('The surface must have the same number of pixels and of spectral points',...
                 'Load Lambertian surface','warn'));
@@ -1158,7 +1246,7 @@ while ne(scelta_menu,22)
                 fprintf(['\n\n   New Size of Lambertian Hypercube: ',num2str(aLambert),' x ',num2str(bLambert),' pixels']);
             end;
 
-           
+
             if ne(ccLambert,cc)
 
                 uiwait(msgbox('Numebr of spectral points is different. Aborting',...
@@ -1195,7 +1283,8 @@ while ne(scelta_menu,22)
 
             end;
 
-        case 14 % Crop/Smoothing
+
+        case 13 % Crop/Smoothing
 
             scelta_CROP_SMOOTHING=menu('Choose action on Hypercube','Crop','Smoothing');
 
@@ -1335,122 +1424,9 @@ while ne(scelta_menu,22)
             end
 
 
-        case 15 % RGB white balance
-
-            black=0; saturation=1; gamma=1; %the image plot parameters are re-setted to the initial ones **Benedetto** 16/11/2020
-
-            %**Benedetto** 24/06/2021 Code modification: possibility to perform the white
-            %balance with values set by the user and specification of the
-            %spectralon reflectivity value
-            uiwait(msgbox('The parameters (black, saturation and gamma) have been set to the initial values.','RGB white balance','warn'));
-
-            RGBwhiteBalance_Source=menu('RGB white balance source', 'Select ROI from image','Set the RGB white values');
-
-            switch RGBwhiteBalance_Source
-                case 1
-                    uiwait(msgbox('Select now a ROI for RGB white balance.','RGB white balance','warn'));
-                    Select_ROI_RGB;
-                    uiwait(msgbox(sprintf('The selected RGB values for the normalization are: \n\nnorm_R=%2.3g\nnorm_G=%2.3g\nnorm_B=%2.3g\n',norm_R,norm_G,norm_B),'warn'));
-                case 2
-                    prompt={'norm\_R','norm\_G','norm\_B'};
-                    name='Set values for the image normalization in white balance';
-                    numlines=1;
-                    defaultanswer={num2str(1),num2str(1),num2str(1)};
-
-                    options.Resize='on';
-                    options.WindowStyle='normal';
-                    options.Interpreter='tex';
-
-                    answer=inputdlg(prompt,name,numlines,defaultanswer,options);
-                    norm_R=str2double(cell2mat(answer(1)));
-                    norm_G=str2double(cell2mat(answer(2)));
-                    norm_B=str2double(cell2mat(answer(3)));
-
-            end
 
 
-            prompt={'Set pure white value','Specify Spectralon reflectivity value (from 0 [black] to 1 [white])'};
-            name='Select value to attribute to pure white';
-            numlines=1;
-            defaultanswer={num2str(0.8),num2str(1)};
-
-            options.Resize='on';
-            options.WindowStyle='normal';
-            options.Interpreter='tex';
-
-            answer=inputdlg(prompt,name,numlines,defaultanswer,options);
-            whiteValue=str2double(cell2mat(answer(1))); %white level as defined by the user
-            Reflectivity_value=str2double(cell2mat(answer(2))); %spectralon reflectivity value
-
-            norm_R=norm_R./Reflectivity_value;
-            norm_G=norm_G./Reflectivity_value;
-            norm_B=norm_B./Reflectivity_value;
-
-            ImmagineRGB_R=ImmagineRGB(:,:,1)/norm_R.*whiteValue; % R
-            ImmagineRGB_G=ImmagineRGB(:,:,2)/norm_G.*whiteValue; % G
-            ImmagineRGB_B=ImmagineRGB(:,:,3)/norm_B.*whiteValue; % B
-
-            noSaturation_R=ones(size(ImmagineRGB_R));
-            noSaturation_G=ones(size(ImmagineRGB_G));
-            noSaturation_B=ones(size(ImmagineRGB_B));
-
-            noSaturation_R(ImmagineRGB_R>1)=0; %R
-            noSaturation_G(ImmagineRGB_G>1)=0; %G
-            noSaturation_B(ImmagineRGB_B>1)=0; %B
-            %noSaturation matrix (for each R, G and B) has 0 in correspondent saturated
-            %values position in ImmagineRGB
-            %the product noSaturation_R.*noSaturation_G.*noSaturation_B has 0 in all
-            %positions in which at least one R, G or B is saturated
-
-            noSaturation_product=noSaturation_R.*noSaturation_G.*noSaturation_B;
-
-            ImmagineRGB_R(noSaturation_product==0)=1; %R
-            ImmagineRGB_G(noSaturation_product==0)=1; %G
-            ImmagineRGB_B(noSaturation_product==0)=1; %B
-            %all pixels [R,G,B] with R>1 || G>1 || B>1 have been put to [1,1,1]
-
-            ImmagineRGB(:,:,1)=ImmagineRGB_R;
-            ImmagineRGB(:,:,2)=ImmagineRGB_G;
-            ImmagineRGB(:,:,3)=ImmagineRGB_B;
-
-            max_image=max(max(max(ImmagineRGB))); %**Benedetto** 16/11/2020
-
-            cla(h1);
-
-            h1=subplot('position',[0.05 0.05 0.5 1],'Colororder',mm);
-            hold all; axis off;
-
-            % subplot(h1);
-
-            image((abs(ImmagineRGB./max_image-black)/saturation).^gamma);
-            axis equal;
-            set(gca,'YDir','reverse')
-
-            %SaturatedPixelsImage map is created in grey levels (integral
-            %R+G+B is put in each one of R, G and B)
-            SaturatedPixelsImage_R=(ImmagineRGB_R+ImmagineRGB_G+ImmagineRGB_B)./max(max(ImmagineRGB_R+ImmagineRGB_G+ImmagineRGB_B)); %R
-            SaturatedPixelsImage_G=SaturatedPixelsImage_R; %G
-            SaturatedPixelsImage_B=SaturatedPixelsImage_R; %B
-            %saturated pixels are set in red
-            SaturatedPixelsImage_R(noSaturation_product==0)=1; %R
-            SaturatedPixelsImage_G(noSaturation_product==0)=0; %G
-            SaturatedPixelsImage_B(noSaturation_product==0)=0; %B
-
-            SaturatedPixelsImage(:,:,1)=SaturatedPixelsImage_R;
-            SaturatedPixelsImage(:,:,2)=SaturatedPixelsImage_G;
-            SaturatedPixelsImage(:,:,3)=SaturatedPixelsImage_B;
-
-            hSaturatedPixels=figure;
-            image(SaturatedPixelsImage);
-            axis equal;
-            title('Saturated pixels map. Press ENTER to continue.');
-            pause;
-            close(hSaturatedPixels);
-            clear ImmagineRGB_R ImmagineRGB_G ImmagineRGB_B;
-            clear noSaturation_R noSaturation_G noSaturation_B;
-            clear noSaturation_product SaturatedPixelsImage_R SaturatedPixelsImage_G SaturatedPixelsImage_B
-
-        case 16 % Map Spectral Peaks Finding Peaks - from SAM
+        case 14 % Map Spectral Peaks Finding Peaks - from SAM
 
             MaxSpectrum=max(max(max(abs(Hyperspectrum_cube)))); %**Benedetto** abs 09/10/2020
             prompt={'Lower wavelength (nm)','Higher wavelength (nm)',...
@@ -1529,7 +1505,7 @@ while ne(scelta_menu,22)
             axis equal; axis off;
 
 
-        case 17 %Plot Hypercube **Benedetto** 16/07/2021
+        case 15 %Plot Hypercube **Benedetto** 16/07/2021
 
             set(h1,'HandleVisibility','off'); %to avoid PlotHypercube to spoil the image **BENEDETTO** 29/11/2021
             set(h3,'HandleVisibility','off'); %to avoid PlotHypercube to spoil the graphs **BENEDETTO** 29/11/2021
@@ -1547,7 +1523,7 @@ while ne(scelta_menu,22)
 
             end
 
-        case 18 %Hypercube derivative **Benedetto 16/07/2021
+        case 16 %Hypercube derivative **Benedetto 16/07/2021
 
             prompt={'Derivative: 1 or 2 (0 for no derivative)'};
             name='Select derivative order';
@@ -1574,6 +1550,36 @@ while ne(scelta_menu,22)
                 Intens_der=sum(abs(Hypercube_derivative),3);
                 uiwait(msgbox('Spectrum on area and Plot Hypercube buttons will visualize the second derivative.','warn'));
             end
+
+
+        case 17
+            Generate_GIF;
+
+
+        case 18 % Save spectra
+
+            % Saves the spectra of selected areas
+
+            % Saving selected spectra
+            [filename_Spectra, pathname_Spectra] = uiputfile('*.txt', 'Save Spectra as',dir2);
+            file_tot=[pathname_Spectra,filename_Spectra];
+
+            spectra_export=[fr_real' Spectrum_subAve Spectrum_subStd];
+
+            stringa=['  -- Saving Selected Spectra in ',file_tot,' --'];
+            fprintf('\n%s\n',stringa);
+            fprintf(['\n  Data format:\n\n    frequency[THz] (1 col)  Intensity[a.u.] Intensity_std[a.u.]\n\n']);
+
+            % Text file with header for columns % Martina 10.2025
+            % save(file_tot,'spectra_export','-ASCII'); % Selected Spectra
+            header = [{'Frequency [THz]'}, repmat({'Spectrum_Ave [a.u.]'}, 1, size(Spectrum_subAve, 2)), repmat({'Spectrum_Std [a.u.]'}, 1, size(Spectrum_subStd, 2))];
+            writecell(header, file_tot, 'Delimiter', '\t');
+            writematrix(spectra_export, file_tot, 'Delimiter', '\t', 'WriteMode', 'append');
+
+            saveas(main,[file_tot(1:end-3),'jpg'],'jpeg');
+
+
+
 
 
         case 19 % Saving image
@@ -1713,43 +1719,15 @@ while ne(scelta_menu,22)
             set(gca,'YDir','reverse')
 
 
-        case 50  % OLD UNUSED
-            Spectral_filter;
-
-            lambda_nm=c./(fr_real*1e12)/1e-9;
-
-            fprintf(['\n   Frequency: ',num2str(fr_real(1)),'-',num2str(fr_real(end)),' THz (', num2str(cc),' spectral points)']);
-            fprintf(['\n   Wavelength: ',num2str(lambda_nm(end)),'-',num2str(lambda_nm(1)),' nm\n\n']);
-
-            % RGB in frequency axis
-            R_THz=interp1(wl, R,lambda_nm).*lambda_nm.^2/c; R_THz(isnan(R_THz))=0;
-            G_THz=interp1(wl, G,lambda_nm).*lambda_nm.^2/c; G_THz(isnan(G_THz))=0;
-            B_THz=interp1(wl, B,lambda_nm).*lambda_nm.^2/c; B_THz(isnan(B_THz))=0;
-
-            % RGB;
-
-            Intens=sum(Hyperspectrum_cube,3);
-
-            ImmagineRGB(:,:,1)=Intens;
-            ImmagineRGB(:,:,2)=Intens;
-            ImmagineRGB(:,:,3)=Intens;
-
-            max_image=max(max(max(ImmagineRGB)));
-            subplot(h1);
-            image((abs(ImmagineRGB./max_image-black)/saturation).^gamma); % era image(abs(ImmagineRGB./max_image)); **Benedetto** 18/11/2020
-            axis equal;
-            set(gca,'YDir','reverse')
-
     end;
 
     scelta_menu = menu('Choose analysis',...
-        'Generate False-RGB map','Spectrum on area','Reflectivity map',...
-        'Transmission map ','Rotate','Save spectral GIF',...
-        'Remove BKG from ROI','Save Spectra','Gamma correction',...
-        'Spectral Angle Mapping','Clean Graphs','Intensity levels',...
-        'Normalize on Lambertian','Crop/Smoothing','RGB white balance',...
-        'Map Spectral Peaks','Plot Hypercube','Hypercube derivative',...
-        'Save current image','Save current Hypercube','Calibrated RGB',...
+        'Remove BKG from ROI','Intensity levels','Gamma correction','Rotate',...
+        'Generate False-RGB map','RGB white balance','Spectrum on area',...
+        'Spectral Angle Mapping','Clean Graphs','Reflectivity map',...
+        'Transmission map ','Normalize on Lambertian','Crop/Smoothing',...
+        'Map Spectral Peaks','Plot Hypercube','Hypercube derivative','Save spectral GIF',...
+        'Save Spectra','Save current image','Save current Hypercube','Calibrated RGB',...
         'EXIT' );
 
 end;
