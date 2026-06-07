@@ -1334,18 +1334,20 @@ while ne(scelta_menu,22)
 
                             V=round(axis);
 
-                            rmin=max([1 round(V(3))]); rmax=min([x_max round(V(4))-1]); % First and last row
-                            cmin=max([1 round(V(1))]); cmax=min([y_max round(V(2))-1]); % First and last column
+                            %Find first and last rows
+                            rmin=max([1 round(V(3))]); rmax=min([x_max round(V(4))-1]);
+                            %Find first and last columns
+                            cmin=max([1 round(V(1))]); cmax=min([y_max round(V(2))-1]);
 
                             Hyperspectrum_cube=Hyperspectrum_cube(rmin:rmax,cmin:cmax,:);
                             Intens=sum(abs(Hyperspectrum_cube),3); %I need to recalculate the Intens map (if then I wan to save the cropped hypercube)
                             ImmagineRGB=ImmagineRGB(rmin:rmax,cmin:cmax,:);
-                            [a,b]=size(Hyperspectrum_cube);
+                            [a,b]=size(Hyperspectrum_cube, [1,2]);
 
                             max_image=max(max(max(ImmagineRGB)));
 
                             figure(main);
-                            cla(h1);
+                            cla(h1, 'reset');
 
                             h1=subplot('position',[0.05 0.05 0.5 1],'Colororder',mm);
                             hold all; axis off;
