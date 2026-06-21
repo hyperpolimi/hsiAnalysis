@@ -1,35 +1,71 @@
 classdef HyperspectralAnalysisApp < matlab.apps.AppBase
-    % HyperspectralAnalysisApp
+    % HyperspectralAnalysisApp  —  Spectral Hypercube Analysis GUI
     %
-    % App Designer-style (programmatic) app for analysis of spectral
-    % hypercubes, based on HyperspectralAnalysis_Spectrum.m
+    % A programmatic App Designer-style application for the interactive
+    % visualisation and analysis of spectral hypercubes (3-D datasets with
+    % two spatial dimensions x, y and one spectral dimension).
     %
-    % PHASE 1 (core features):
-    %   - Load hypercube (.mat / .h5 / .mj2), with frequency calibration
-    %   - Display image with black/saturation/gamma levels
-    %   - Rotate (90/-90/180/custom)
-    %   - Generate false-RGB map (spectral range or single wavelengths,
-    %     with spatial binning)
-    %   - RGB white balance
-    %   - Spectrum from ROI (polygon/rectangle), with shaded std. dev.
-    %   - Spectrum at clicked pixel
-    %   - Remove background from ROI
-    %   - Clean graphs
-    %   - Save spectra / current image / current hypercube
+    % ---------------------------------------------------------------
+    % HOW TO RUN
+    %   >> HyperspectralAnalysisApp
+    % ---------------------------------------------------------------
     %
-    % REQUIREMENTS (must be on the MATLAB path / next to this file):
-    %   - RGB_Transmission.mat   (R, G, B, wl variables)
-    %   - RGBspectra/            (folder, as in the original script)
-    %   - save_hypercube.m       (external function, used by "Save Hypercube")
+    % SUPPORTED FILE FORMATS
+    %   .mat   MATLAB workspace file containing Hyperspectrum_cube and
+    %          (optionally) f, fr_real, saturationMap, Intens.
+    %   .h5    HDF5 file with a /SpectralHypercube group.
+    %   .mj2   Motion JPEG 2000 video + companion _VALUES.mat sidecar.
     %
-    % Internally, spectral data is stored vs. frequency (f, fr_real, THz)
-    % exactly as in the original script. All plots/axes use wavelength
-    % (lambda_nm = c./(fr_real*1e12)/1e-9), in nm.
+    % SPECTRAL AXIS CONVENTION
+    %   The app auto-detects the spectral axis from the loaded file:
+    %     1. fr_real  [THz]    ->  lambda [nm]  = c / (fr_real * 1e12) / 1e-9
+    %     2. f        [µm⁻¹]   ->  plotted as-is (pseudofrequency axis)
+    %     3. Neither present   ->  spectral index 1, 2, 3, ...
+    %   All spectra are plotted against the derived axis; the axis label
+    %   updates accordingly.
     %
-    % Phase 2 (planned): Spectral Angle Mapping, Reflectivity/Transmission
-    % maps, Lambertian normalization, crop/spectral smoothing, peak
-    % mapping, hypercube derivative + PlotHypercube, GIF export,
-    % calibrated (CIE) RGB.
+    % TABS AND FEATURES
+    %   File      Load hypercube, file info, spectral range.
+    %   Display   Levels (black / saturation / gamma), pixel intensity
+    %             histogram, auto-levels, rotation, custom X/Y axes.
+    %   RGB       False-RGB (spectral range or single wavelengths),
+    %             white balance, calibrated CIE RGB (requires
+    %             colorMatchFcn and illuminant on the MATLAB path).
+    %   Spectra   ROI spectrum (polygon or rectangle) with shaded std,
+    %             pixel-click spectrum, background removal, clean graphs.
+    %   Maps      Spectral Angle Mapping (SAM), reflectivity map,
+    %             transmission map, Lambertian normalisation,
+    %             spectral peak mapping.
+    %   Analysis  SVD denoising (explained-variance plot, component
+    %             viewer, replace/save options).
+    %             K-means clustering (uses existing mask via
+    %             NoSaturationMap; calls external kmeans_tool).
+    %   Process   Spectral / spatial crop, spatial smoothing,
+    %             hypercube derivative (order 0/1/2), PlotHypercube
+    %             (calls external PlotHypercube), threshold mask.
+    %   Export    Save spectra + figure (.txt + .jpg), save current
+    %             image, save current hypercube (calls external
+    %             save_hypercube), save spectral GIF.
+    %
+    % EXTERNAL DEPENDENCIES (must be on the MATLAB path)
+    %   save_hypercube.m      — saves hypercube in the project format.
+    %   PlotHypercube.m       — 3-D hypercube viewer.
+    %   kmeans_tool.m         — k-means wrapper returning [CLUSTERS, CENTROIDS].
+    %   colorMatchFcn.m       — CIE colour-matching functions (optional).
+    %   illuminant.m          — CIE illuminant spectra (optional).
+    %   RGB_Transmission.mat  — R, G, B filter curves + wl wavelength axis.
+    %
+    % NOTES
+    %   • The working hypercube (app.Hyperspectrum_cube) is modified
+    %     in-place by background removal, Lambertian normalisation,
+    %     reflectivity/transmission, spatial/spectral crop, smoothing,
+    %     and masking.  Reload the file to restore the original.
+    %   • All ROI drawing, pixel-click, and mask operations use pixel
+    %     indices internally; custom X/Y axes are display-only (tick
+    %     labels) and do not affect any computations.
+    %   • The derivative flag (order 0/1/2) redirects ROI/pixel spectra,
+    %     SVD, k-means, PlotHypercube, and Save Hypercube to operate on
+    %     diff(abs(cube), order, 3) rather than the raw cube.
 
     % ---------------------------------------------------------------
     % UI components
@@ -57,6 +93,7 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
         GammaEditField
         ApplyLevelsButton
         AutoLevelsButton
+        ShowHistogramButton
         RotateButton
         CleanGraphsButton
         CustomAxesButton
@@ -297,39 +334,43 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
 
         function createDisplayTab(app)
             app.DisplayTab = uitab(app.ControlTabGroup,'Title','Display');
-            g = uigridlayout(app.DisplayTab,[8 2]);
-            g.RowHeight = {28,28,28,36,36,12,36,36};
+            g = uigridlayout(app.DisplayTab,[9 2]);
+            g.RowHeight = {36,28,28,28,36,36,12,36,36};
             g.ColumnWidth = {'1x','1x'};
 
+            app.ShowHistogramButton = uibutton(g,'push','Text','Show pixel intensity histogram');
+            app.ShowHistogramButton.Layout.Row = 1; app.ShowHistogramButton.Layout.Column = [1 2];
+            app.ShowHistogramButton.ButtonPushedFcn = @(~,~) app.ShowHistogramButtonPushed();
+
             l1 = uilabel(g,'Text','Black level');
-            l1.Layout.Row = 1; l1.Layout.Column = 1;
+            l1.Layout.Row = 2; l1.Layout.Column = 1;
             app.BlackEditField = uieditfield(g,'numeric','Value',0,'Limits',[0 Inf]);
-            app.BlackEditField.Layout.Row = 1; app.BlackEditField.Layout.Column = 2;
+            app.BlackEditField.Layout.Row = 2; app.BlackEditField.Layout.Column = 2;
 
             l2 = uilabel(g,'Text','Saturation level');
-            l2.Layout.Row = 2; l2.Layout.Column = 1;
+            l2.Layout.Row = 3; l2.Layout.Column = 1;
             app.SaturationEditField = uieditfield(g,'numeric','Value',1,'Limits',[0 Inf]);
-            app.SaturationEditField.Layout.Row = 2; app.SaturationEditField.Layout.Column = 2;
+            app.SaturationEditField.Layout.Row = 3; app.SaturationEditField.Layout.Column = 2;
 
             l3 = uilabel(g,'Text','Gamma');
-            l3.Layout.Row = 3; l3.Layout.Column = 1;
+            l3.Layout.Row = 4; l3.Layout.Column = 1;
             app.GammaEditField = uieditfield(g,'numeric','Value',1,'Limits',[0 Inf]);
-            app.GammaEditField.Layout.Row = 3; app.GammaEditField.Layout.Column = 2;
+            app.GammaEditField.Layout.Row = 4; app.GammaEditField.Layout.Column = 2;
 
             app.ApplyLevelsButton = uibutton(g,'push','Text','Apply levels / gamma');
-            app.ApplyLevelsButton.Layout.Row = 4; app.ApplyLevelsButton.Layout.Column = [1 2];
+            app.ApplyLevelsButton.Layout.Row = 5; app.ApplyLevelsButton.Layout.Column = [1 2];
             app.ApplyLevelsButton.ButtonPushedFcn = @(~,~) app.ApplyLevelsButtonPushed();
 
             app.AutoLevelsButton = uibutton(g,'push','Text','Auto levels (0.5-99.5 pct)');
-            app.AutoLevelsButton.Layout.Row = 5; app.AutoLevelsButton.Layout.Column = [1 2];
+            app.AutoLevelsButton.Layout.Row = 6; app.AutoLevelsButton.Layout.Column = [1 2];
             app.AutoLevelsButton.ButtonPushedFcn = @(~,~) app.AutoLevelsButtonPushed();
 
             app.RotateButton = uibutton(g,'push','Text','Rotate hypercube');
-            app.RotateButton.Layout.Row = 7; app.RotateButton.Layout.Column = [1 2];
+            app.RotateButton.Layout.Row = 8; app.RotateButton.Layout.Column = [1 2];
             app.RotateButton.ButtonPushedFcn = @(~,~) app.RotateButtonPushed();
 
             app.CustomAxesButton = uibutton(g,'push','Text','Custom X/Y axes...');
-            app.CustomAxesButton.Layout.Row = 8; app.CustomAxesButton.Layout.Column = [1 2];
+            app.CustomAxesButton.Layout.Row = 9; app.CustomAxesButton.Layout.Column = [1 2];
             app.CustomAxesButton.ButtonPushedFcn = @(~,~) app.CustomAxesButtonPushed();
         end
 
@@ -630,6 +671,63 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
             app.GammaEditField.Value = app.gammaVal;
             app.updateImageDisplay();
             app.StatusLabel.Text = 'Auto levels applied.';
+        end
+
+        function ShowHistogramButtonPushed(app, ~)
+            % Show a histogram of the normalised pixel intensities of the
+            % current display image (0-1 range, same scale as the black
+            % and saturation level fields).  Vertical lines mark the
+            % current black and saturation levels, and the 0.5th and
+            % 99.5th percentiles are annotated to guide the user.
+            if isempty(app.ImmagineRGB)
+                return
+            end
+
+            mx = max(app.ImmagineRGB(:));
+            if mx == 0
+                mx = 1;
+            end
+            vals = abs(app.ImmagineRGB(:)) / mx;
+
+            lo05  = app.localPercentile(vals, 0.5);
+            hi995 = app.localPercentile(vals, 99.5);
+
+            figHist = figure('Name','Pixel intensity histogram','NumberTitle','off', ...
+                'Position',[200 200 560 380]);
+            axH = axes('Parent',figHist);
+
+            histogram(axH, vals, 256, 'EdgeColor','none','FaceColor',[0.3 0.5 0.8]);
+            xlabel(axH,'Normalised intensity (0–1)','FontSize',12);
+            ylabel(axH,'Pixel count','FontSize',12);
+            title(axH,'Pixel intensity histogram','FontSize',13);
+            grid(axH,'on');
+            xlim(axH,[0 1]);
+
+            hold(axH,'on');
+
+            % Current black level
+            xline(axH, app.blackLevel,'r-','LineWidth',1.8, ...
+                'Label',sprintf('Black = %.4g',app.blackLevel), ...
+                'LabelVerticalAlignment','top','FontSize',10);
+
+            % Current saturation level
+            xline(axH, min(app.saturationLevel,1),'g-','LineWidth',1.8, ...
+                'Label',sprintf('Sat. = %.4g',app.saturationLevel), ...
+                'LabelVerticalAlignment','top','FontSize',10);
+
+            % 0.5th and 99.5th percentiles for reference
+            xline(axH, lo05,'b--','LineWidth',1.2, ...
+                'Label',sprintf('0.5pct = %.4g',lo05), ...
+                'LabelVerticalAlignment','bottom','FontSize',9);
+            xline(axH, hi995,'m--','LineWidth',1.2, ...
+                'Label',sprintf('99.5pct = %.4g',hi995), ...
+                'LabelVerticalAlignment','bottom','FontSize',9);
+
+            hold(axH,'off');
+
+            app.StatusLabel.Text = sprintf( ...
+                'Histogram: 0.5pct = %.4g, 99.5pct = %.4g, current black = %.4g, sat = %.4g.', ...
+                lo05, hi995, app.blackLevel, app.saturationLevel);
         end
 
         function RotateButtonPushed(app, ~)
@@ -1127,7 +1225,7 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
             if app.ClickModeOn
                 app.PixelClickButton.Text = 'Pixel click mode: ON (click image to stop)';
                 app.UIFigure.Pointer = 'crosshair';
-                app.StatusLabel.Text = 'Click on the image to plot the spectrum at that pixel.';
+                app.StatusLabel.Text = 'Click on image to plot spectrum (4×4 px average). Click button again to stop.';
             else
                 app.PixelClickButton.Text = 'Pixel spectrum (click on image)';
                 app.UIFigure.Pointer = 'arrow';
@@ -1147,17 +1245,37 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
                 return
             end
 
-            [dataCube, ~] = app.activeSpectralData();
-            spec = abs(squeeze(dataCube(yPix,xPix,:)));
+            % Compute a 4x4 neighbourhood average centred on the clicked
+            % pixel.  The window is clamped to the image boundaries so
+            % that edge/corner clicks still produce a valid spectrum.
+            binHalf = 1;  % half-width giving a (2*binHalf+2) x (2*binHalf+2) = 4x4 window
+            yLo = max(1,        yPix - binHalf);
+            yHi = min(app.a,    yPix + binHalf + 1);
+            xLo = max(1,        xPix - binHalf);
+            xHi = min(app.b,    xPix + binHalf + 1);
 
-            specStd = zeros(size(spec));
+            [dataCube, ~] = app.activeSpectralData();
+            patch = dataCube(yLo:yHi, xLo:xHi, :);
+            nPix = (yHi-yLo+1) * (xHi-xLo+1);
+            patchMat = reshape(abs(patch), nPix, size(patch,3));
+
+            spec    = mean(patchMat, 1)';
+            specStd = std(patchMat, 0, 1)';
+
             app.addSpectrumToPlots(spec, specStd);
 
             col = app.mm(mod(app.num_spectrum-1,8)+1,:);
-            markerHandle = plot(app.ImageAxes, xPix, yPix, 'o','MarkerEdgeColor',col,'MarkerSize',8,'LineWidth',2);
-            app.PixelMarkerHandles(end+1) = markerHandle;
+            % Draw a small rectangle showing the averaged area.
+            rectHandle = rectangle(app.ImageAxes, ...
+                'Position',[xLo-0.5, yLo-0.5, xHi-xLo+1, yHi-yLo+1], ...
+                'EdgeColor',col,'LineWidth',1.5,'FaceColor','none');
+            % Store as a line handle (rectangle is not a line, so keep in
+            % a separate cell for cleanup).
+            app.RoiHandles{end+1} = rectHandle;
 
-            app.StatusLabel.Text = sprintf('Pixel spectrum #%d added at (x=%d, y=%d).', app.num_spectrum, xPix, yPix);
+            app.StatusLabel.Text = sprintf( ...
+                'Pixel spectrum #%d added at (x=%d, y=%d), 4×4 px average (%d px, clamped to image).', ...
+                app.num_spectrum, xPix, yPix, nPix);
         end
 
         function RemoveBKGButtonPushed(app, ~)
@@ -1683,10 +1801,58 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
             cubeL(cubeL==0) = maxL/10000;
 
             [aL,bL,ccL] = size(cubeL);
-            if aL ~= app.a || bL ~= app.b || ccL ~= app.cc
-                uialert(app.UIFigure, sprintf(['Size mismatch: current hypercube is %dx%dx%d, ' ...
-                    'Lambertian is %dx%dx%d. Aborting.'], app.a, app.b, app.cc, aL, bL, ccL), ...
-                    'Normalize on Lambertian');
+
+            % If the Lambertian cube has different spatial dimensions,
+            % try to find a Settings.mat file alongside the current
+            % hypercube that contains x_limits and y_limits fields
+            % identifying the relevant sub-region of the Lambertian cube.
+            if aL ~= app.a || bL ~= app.b
+                % Settings file is expected next to the current hypercube,
+                % named by stripping the last 21 characters from the
+                % hypercube filename and appending "Settings.mat".
+                if numel(app.filename_Hyper) > 21
+                    settingsName = strcat(app.filename_Hyper(1:end-21), 'Settings.mat');
+                else
+                    settingsName = 'Settings.mat';
+                end
+                settingsPath = fullfile(app.pathname_Hyper, settingsName);
+
+                if exist(settingsPath,'file')
+                    try
+                        S = load(settingsPath);
+                        xLim = S.settings.x_limits;
+                        yLim = S.settings.y_limits;
+                        cubeL = cubeL(yLim(1):yLim(2)+1, xLim(1):xLim(2)+1, :);
+                        [aL,bL] = size(cubeL,[1 2]);
+                        app.StatusLabel.Text = sprintf( ...
+                            'Lambertian cropped via Settings.mat to %d x %d px.', bL, aL);
+                    catch ME
+                        uialert(app.UIFigure, sprintf( ...
+                            ['Settings.mat found but could not be used: %s\n\n' ...
+                             'Lambertian size (%dx%d) still does not match ' ...
+                             'current hypercube (%dx%d). Aborting.'], ...
+                            ME.message, bL, aL, app.b, app.a), ...
+                            'Normalize on Lambertian');
+                        return
+                    end
+                end
+
+                % Final size check after optional crop.
+                if aL ~= app.a || bL ~= app.b
+                    uialert(app.UIFigure, sprintf( ...
+                        ['Spatial size mismatch: current hypercube is %dx%d, ' ...
+                         'Lambertian is %dx%d.\n\nNo Settings.mat was found (or the ' ...
+                         'cropped region still does not match). Aborting.'], ...
+                        app.b, app.a, bL, aL), 'Normalize on Lambertian');
+                    return
+                end
+            end
+
+            % Spectral dimension check (must match regardless).
+            if ccL ~= app.cc
+                uialert(app.UIFigure, sprintf( ...
+                    'Spectral dimension mismatch: current hypercube has %d points, Lambertian has %d. Aborting.', ...
+                    app.cc, ccL), 'Normalize on Lambertian');
                 return
             end
 
@@ -1991,10 +2157,8 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
             d = uiprogressdlg(app.UIFigure,'Title','K-means clustering', ...
                 'Message','Running k-means (this may take a while)...','Indeterminate','on');
 
-           try
-                [IDX,CENTROIDS] = kmeans(Xvalid,nClusters);
-                CLUSTERS_valid = reshape(IDX,a,b,1); %CLUSTERS is a 2D map where each pixels has an integer value indicating the belonging cluster
-                CENTROIDS = CENTROIDS'; %in this way the centroids are column spectra
+            try
+                [CLUSTERS_valid, CENTROIDS] = kmeans_tool(Xvalid, nClusters);
             catch ME
                 close(d);
                 uialert(app.UIFigure, ME.message,'Error in kmeans_tool'); return
@@ -2003,11 +2167,13 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
             close(d);
 
             % Rebuild the full cluster map (masked pixels = 0).
-            CLUSTERS = zeros(a, b, 1);
+            CLUSTERS = zeros(a*b, 1);
             CLUSTERS(validMask(:)) = CLUSTERS_valid(:);
             clusteredMap = reshape(CLUSTERS, [a, b]);
+
             % Colour palette.
-            MAP_COLOR = eval(['parula', '(', num2str(nClusters), ')']);;
+            MAP_COLOR = parula(nClusters);
+
             lam = lambdaCur(:);
             maxC = max(CENTROIDS(:));
             minC = min(CENTROIDS(:));
