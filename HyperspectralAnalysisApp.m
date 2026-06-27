@@ -3193,6 +3193,18 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
                 % so we update it in place via the nested function below.
                 chIdx = r;
                 cb.ValueChangedFcn = @(src,~) previewChannel(src, chIdx);
+
+                % When the spectral band (Start/Stop) for this channel is
+                % changed, read the actual min/max intensity for that band
+                % from the hypercube and write them into the Min/Max fields.
+                fields{r,1}.ValueChangedFcn = @(~,~) refreshLevels(chIdx);
+                fields{r,2}.ValueChangedFcn = @(~,~) refreshLevels(chIdx);
+            end
+
+            % Pre-fill the Min/Max fields with the intensity range of each
+            % channel's default (full-spectrum) band, read from the cube.
+            for r = 1:3
+                refreshLevels(r);
             end
 
             % --- OK / Cancel buttons ---
@@ -3293,22 +3305,46 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
                 % Reset checkbox so user can preview again after adjustments.
                 cbSrc.Value = false;
             end
+
+            % ----------------------------------------------------------
+            % Nested function: refresh the Min/Max fields of a channel by
+            % reading the actual intensity range of the chosen band from
+            % the hypercube.  Has access to fields and app from the
+            % enclosing scope.
+            % ----------------------------------------------------------
+            function refreshLevels(idx)
+                startLam = fields{idx,1}.Value;
+                stopLam  = fields{idx,2}.Value;
+                lam = app.lambda_nm(:)';
+                [~, dMin, dMax] = app.customBandChannel(app.Hyperspectrum_cube, ...
+                    lam, startLam, stopLam, 0, 0);
+                fields{idx,3}.Value = dMin;
+                fields{idx,4}.Value = dMax;
+            end
         end
 
-        function ch = customBandChannel(~, cube, lam, startLam, stopLam, minVal, maxVal)
+        function [ch, dataMin, dataMax] = customBandChannel(~, cube, lam, startLam, stopLam, minVal, maxVal)
             % Average the hypercube over the specified wavelength band and
             % normalise each channel to [0,1].  If minVal == maxVal == 0
             % the min/max are taken from the data automatically.
+            %
+            % dataMin / dataMax always return the actual intensity extremes
+            % of the band-averaged image (independent of minVal/maxVal), so
+            % callers can read the data range for the chosen band.
             idx = lam >= min(startLam,stopLam) & lam <= max(startLam,stopLam);
             if ~any(idx)
                 % No spectral points in range: return a black channel.
                 ch = zeros(size(cube,1), size(cube,2));
+                dataMin = 0;
+                dataMax = 0;
                 return
             end
             ch = mean(abs(cube(:,:,idx)), 3, 'omitnan');
+            dataMin = min(ch(:));
+            dataMax = max(ch(:));
             if minVal == 0 && maxVal == 0
-                minVal = min(ch(:));
-                maxVal = max(ch(:));
+                minVal = dataMin;
+                maxVal = dataMax;
             end
             if maxVal == minVal
                 ch = zeros(size(ch));
