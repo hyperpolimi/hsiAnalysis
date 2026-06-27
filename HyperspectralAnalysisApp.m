@@ -19,7 +19,7 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
     % SPECTRAL AXIS CONVENTION
     %   The app auto-detects the spectral axis from the loaded file:
     %     1. fr_real  [THz]    ->  lambda [nm]  = c / (fr_real * 1e12) / 1e-9
-    %     2. f        [µm⁻¹]   ->  plotted as-is (pseudofrequency axis)
+    %     2. f        [µm⁻¹]   ->  plotted as-is (wavenumber axis)
     %     3. Neither present   ->  spectral index 1, 2, 3, ...
     %   All spectra are plotted against the derived axis; the axis label
     %   updates accordingly.
@@ -508,7 +508,8 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
         % File / loading
         % ----------------------------------------------------------
         function LoadButtonPushed(app, ~)
-            [filename, pathname] = uigetfile({'*.mat;*.h5;*.mj2','Hypercube files (*.mat,*.h5,*.mj2)'}, ...
+            [filename, pathname] = uigetfile( ...
+                {'*.mat;*.h5;*.mj2;*.npy;*.npz','Hypercube files (*.mat,*.h5,*.mj2,*.npy,*.npz)'}, ...
                 'Load spectral Hypercube');
             if isequal(filename,0)
                 return
@@ -529,6 +530,10 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
                         [cube,f,satMap,file_totCal,fr_real,Intens] = app.H5HypercubeRead(file_tot);
                     case '.mj2'
                         [cube,f,satMap,file_totCal,fr_real,Intens] = app.MJ2HypercubeRead(file_tot);
+                    case '.npy'
+                        [cube,f,satMap,file_totCal,fr_real,Intens] = app.NPYHypercubeRead(file_tot);
+                    case '.npz'
+                        [cube,f,satMap,file_totCal,fr_real,Intens] = app.NPZHypercubeRead(file_tot);
                     otherwise
                         [cube,f,satMap,file_totCal,fr_real,Intens] = app.MATHypercubeRead(file_tot);
                 end
@@ -959,13 +964,14 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
             end
 
             mode = uiconfirm(app.UIFigure,'Choose RGB generation mode:','False-RGB map', ...
-                'Options',{'Spectral range','Single wavelengths','Cancel'}, ...
-                'DefaultOption',1,'CancelOption',3);
+                'Options',{'Spectral range','Single wavelengths','Custom bands per channel','Cancel'}, ...
+                'DefaultOption',1,'CancelOption',4);
             if strcmp(mode,'Cancel')
                 return
             end
 
             cube = app.Hyperspectrum_cube;
+            lam  = app.lambda_nm(:)';
 
             switch mode
                 case 'Spectral range'
@@ -985,9 +991,9 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
                     % Stretch the RGB filter curves to cover the requested band
                     wl1 = (lm2-lm1)/(690-390)*(app.wl-390) + lm1;
 
-                    R1 = interp1(wl1, app.R, app.lambda_nm) .* app.lambda_nm.^2 / app.c; R1(isnan(R1)) = 0;
-                    G1 = interp1(wl1, app.G, app.lambda_nm) .* app.lambda_nm.^2 / app.c; G1(isnan(G1)) = 0;
-                    B1 = interp1(wl1, app.B, app.lambda_nm) .* app.lambda_nm.^2 / app.c; B1(isnan(B1)) = 0;
+                    R1 = interp1(wl1, app.R, lam) .* lam.^2 / app.c; R1(isnan(R1)) = 0;
+                    G1 = interp1(wl1, app.G, lam) .* lam.^2 / app.c; G1(isnan(G1)) = 0;
+                    B1 = interp1(wl1, app.B, lam) .* lam.^2 / app.c; B1(isnan(B1)) = 0;
 
                     R1 = R1 / sum(R1);
                     G1 = G1 / sum(G1);
@@ -1002,9 +1008,9 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
 
                     app.ImmagineRGB = cat(3,ImR,ImG,ImB);
 
-                    hRGB = plot(app.NormSpectrumAxes, app.lambda_nm, R1/max(R1),'r--', ...
-                        app.lambda_nm, G1/max(G1),'g--', ...
-                        app.lambda_nm, B1/max(B1),'b--','LineWidth',1);
+                    hRGB = plot(app.NormSpectrumAxes, lam, R1/max(R1),'r--', ...
+                        lam, G1/max(G1),'g--', ...
+                        lam, B1/max(B1),'b--','LineWidth',1);
                     for kRGB = 1:numel(hRGB)
                         app.NormSpectrumPlotHandles(end+1) = hRGB(kRGB);
                     end
@@ -1024,9 +1030,9 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
                         uialert(app.UIFigure,'Invalid numeric input.','Error'); return
                     end
 
-                    [~,idxR] = min(abs(app.lambda_nm - lmR));
-                    [~,idxG] = min(abs(app.lambda_nm - lmG));
-                    [~,idxB] = min(abs(app.lambda_nm - lmB));
+                    [~,idxR] = min(abs(lam - lmR));
+                    [~,idxG] = min(abs(lam - lmG));
+                    [~,idxB] = min(abs(lam - lmB));
 
                     cubeBin = app.spatialBin(cube, binSize);
 
@@ -1035,12 +1041,44 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
                     imageB = mat2gray(abs(cubeBin(:,:,idxB)));
                     app.ImmagineRGB = cat(3,imageR,imageG,imageB);
 
-                    hR = xline(app.NormSpectrumAxes, app.lambda_nm(idxR),'r--','R','LineWidth',1.5);
-                    hG = xline(app.NormSpectrumAxes, app.lambda_nm(idxG),'g--','G','LineWidth',1.5);
-                    hB = xline(app.NormSpectrumAxes, app.lambda_nm(idxB),'b--','B','LineWidth',1.5);
+                    hR = xline(app.NormSpectrumAxes, lam(idxR),'r--','R','LineWidth',1.5);
+                    hG = xline(app.NormSpectrumAxes, lam(idxG),'g--','G','LineWidth',1.5);
+                    hB = xline(app.NormSpectrumAxes, lam(idxB),'b--','B','LineWidth',1.5);
                     app.NormSpectrumPlotHandles(end+1) = hR;
                     app.NormSpectrumPlotHandles(end+1) = hG;
                     app.NormSpectrumPlotHandles(end+1) = hB;
+
+                case 'Custom bands per channel'
+                    % Open a compact dialog with one row per channel.
+                    % Each row has: start wavelength | stop wavelength |
+                    % min intensity | max intensity.
+                    % min = max = 0 means auto-scale from the data.
+                    lamMin = min(lam);
+                    lamMax = max(lam);
+
+                    result = app.customBandDialog(lamMin, lamMax);
+                    if isempty(result)
+                        return
+                    end
+                    startR = result(1); stopR = result(2); minR = result(3); maxR = result(4);
+                    startG = result(5); stopG = result(6); minG = result(7); maxG = result(8);
+                    startB = result(9); stopB = result(10); minB = result(11); maxB = result(12);
+
+                    app.ImmagineRGB = cat(3, ...
+                        app.customBandChannel(cube, lam, startR, stopR, minR, maxR), ...
+                        app.customBandChannel(cube, lam, startG, stopG, minG, maxG), ...
+                        app.customBandChannel(cube, lam, startB, stopB, minB, maxB));
+
+                    % Show band extents on the normalised spectrum axes.
+                    hR1 = xline(app.NormSpectrumAxes,startR,'r-','LineWidth',1.2);
+                    hR2 = xline(app.NormSpectrumAxes,stopR, 'r-','LineWidth',1.2);
+                    hG1 = xline(app.NormSpectrumAxes,startG,'g-','LineWidth',1.2);
+                    hG2 = xline(app.NormSpectrumAxes,stopG, 'g-','LineWidth',1.2);
+                    hB1 = xline(app.NormSpectrumAxes,startB,'b-','LineWidth',1.2);
+                    hB2 = xline(app.NormSpectrumAxes,stopB, 'b-','LineWidth',1.2);
+                    for hh = [hR1 hR2 hG1 hG2 hB1 hB2]
+                        app.NormSpectrumPlotHandles(end+1) = hh;
+                    end
             end
 
             app.RGB_flag = 1;
@@ -3085,6 +3123,201 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
             app.Spectrum_subStd(:,app.num_spectrum) = e;
         end
 
+        function result = customBandDialog(app, lamMin, lamMax)
+            % customBandDialog  Modal dialog for custom-band RGB generation.
+            %
+            % Layout (one row per channel):
+            %   Channel | Start (nm) | Stop (nm) | Min | Max | Preview
+            %
+            % Clicking the Preview checkbox opens a grayscale window for
+            % that channel using the current field values, then resets the
+            % checkbox so the user can adjust and preview again.
+            %
+            % Returns a 1x12 vector [startR stopR minR maxR startG ...] or
+            % [] if the user cancels.
+
+            result = [];
+
+            % Shared container for preview figure handles (one per channel).
+            % Stored as a 1x3 cell so the inline callbacks can update it.
+            previewFigs = {[], [], []};
+
+            dlg = uifigure('Name','Custom bands per channel', ...
+                'Position',[200 200 780 230], ...
+                'WindowStyle','modal','Resize','off');
+
+            g = uigridlayout(dlg,[5 7]);
+            g.RowHeight    = {24, 36, 36, 36, 40};
+            g.ColumnWidth  = {50, 105, 105, 105, 105, 90, '1x'};
+            g.Padding      = [12 10 12 10];
+            g.RowSpacing   = 6;
+            g.ColumnSpacing = 8;
+
+            % --- Header row ---
+            headers = {'', 'Start (nm)', 'Stop (nm)', 'Min (0=auto)', 'Max (0=auto)', 'Preview'};
+            for c = 1:6
+                lbl = uilabel(g,'Text',headers{c},'FontWeight','bold', ...
+                    'HorizontalAlignment','center');
+                lbl.Layout.Row = 1; lbl.Layout.Column = c;
+            end
+
+            % --- Channel rows ---
+            chLabels = {'Red','Green','Blue'};
+            chColors = {[0.85 0.15 0.15],[0.10 0.65 0.10],[0.10 0.35 0.85]};
+            fields   = cell(3,4); % {start, stop, min, max} per channel
+
+            for r = 1:3
+                row = r + 1;
+
+                lbl = uilabel(g,'Text',chLabels{r}(1),'FontWeight','bold', ...
+                    'FontColor',chColors{r},'HorizontalAlignment','center');
+                lbl.Layout.Row = row; lbl.Layout.Column = 1;
+
+                fields{r,1} = uieditfield(g,'numeric','Value',lamMin);
+                fields{r,1}.Layout.Row = row; fields{r,1}.Layout.Column = 2;
+
+                fields{r,2} = uieditfield(g,'numeric','Value',lamMax);
+                fields{r,2}.Layout.Row = row; fields{r,2}.Layout.Column = 3;
+
+                fields{r,3} = uieditfield(g,'numeric','Value',0);
+                fields{r,3}.Layout.Row = row; fields{r,3}.Layout.Column = 4;
+
+                fields{r,4} = uieditfield(g,'numeric','Value',0);
+                fields{r,4}.Layout.Row = row; fields{r,4}.Layout.Column = 5;
+
+                cb = uicheckbox(g,'Text','','Value',false);
+                cb.Layout.Row = row; cb.Layout.Column = 6;
+
+                % Inline callback: captures r, fields, previewFigs by
+                % value at the time the loop runs. previewFigs is a cell
+                % so we update it in place via the nested function below.
+                chIdx = r;
+                cb.ValueChangedFcn = @(src,~) previewChannel(src, chIdx);
+            end
+
+            % --- OK / Cancel buttons ---
+            btnGrid = uigridlayout(g,[1 2]);
+            btnGrid.Layout.Row = 5; btnGrid.Layout.Column = [1 6];
+            btnGrid.ColumnWidth = {'1x','1x'};
+            btnGrid.Padding = [0 0 0 0];
+
+            okBtn     = uibutton(btnGrid,'push','Text','OK');
+            okBtn.Layout.Row = 1; okBtn.Layout.Column = 2;
+            cancelBtn = uibutton(btnGrid,'push','Text','Cancel'); %#ok<NASGU>
+            cancelBtn.Layout.Row = 1; cancelBtn.Layout.Column = 1;
+
+            okBtn.ButtonPushedFcn     = @(~,~) set(okBtn,'Tag','ok');
+            cancelBtn.ButtonPushedFcn = @(~,~) set(okBtn,'Tag','cancel');
+
+            % Wait for either button.
+            waitfor(okBtn,'Tag');
+
+            confirmed = false;
+            if isvalid(dlg)
+                if strcmp(okBtn.Tag,'ok')
+                    confirmed = true;
+                    vals = zeros(1,12);
+                    for r = 1:3
+                        base = (r-1)*4;
+                        vals(base+1) = fields{r,1}.Value;
+                        vals(base+2) = fields{r,2}.Value;
+                        vals(base+3) = fields{r,3}.Value;
+                        vals(base+4) = fields{r,4}.Value;
+                    end
+                end
+                delete(dlg);
+            end
+
+            % Close any open preview windows.
+            for r = 1:3
+                if ~isempty(previewFigs{r}) && isvalid(previewFigs{r})
+                    close(previewFigs{r});
+                end
+            end
+
+            if confirmed
+                result = vals;
+            end
+
+            % ----------------------------------------------------------
+            % Nested function: has direct access to previewFigs, fields,
+            % app, and chLabels from the enclosing scope.
+            % ----------------------------------------------------------
+            function previewChannel(cbSrc, idx)
+                if ~cbSrc.Value
+                    return
+                end
+
+                startLam = fields{idx,1}.Value;
+                stopLam  = fields{idx,2}.Value;
+                minVal   = fields{idx,3}.Value;
+                maxVal   = fields{idx,4}.Value;
+
+                lam = app.lambda_nm(:)';
+                ch  = app.customBandChannel(app.Hyperspectrum_cube, lam, ...
+                    startLam, stopLam, minVal, maxVal);
+
+                figTitle = sprintf('Preview – %s channel  [%.4g – %.4g nm]', ...
+                    chLabels{idx}, min(startLam,stopLam), max(startLam,stopLam));
+
+                % Reuse existing preview window if still open.
+                if ~isempty(previewFigs{idx}) && isvalid(previewFigs{idx})
+                    fig = previewFigs{idx};
+                    fig.Name = figTitle;
+                    axP = fig.CurrentAxes;
+                    if isempty(axP) || ~isvalid(axP)
+                        axP = axes('Parent',fig);
+                    end
+                else
+                    fig = figure('Name',figTitle,'NumberTitle','off', ...
+                        'Position',[300 150 500 450]);
+                    axP = axes('Parent',fig);
+                    previewFigs{idx} = fig;
+                end
+
+                imshow(ch,[0 1],'Parent',axP);
+                colormap(axP,gray(256));
+                axis(axP,'equal'); axis(axP,'off');
+
+                if minVal == 0 && maxVal == 0
+                    titleStr = sprintf('%s channel (auto-scaled)  %.4g – %.4g nm', ...
+                        chLabels{idx}, min(startLam,stopLam), max(startLam,stopLam));
+                else
+                    titleStr = sprintf('%s channel  min=%.4g  max=%.4g  %.4g – %.4g nm', ...
+                        chLabels{idx}, minVal, maxVal, ...
+                        min(startLam,stopLam), max(startLam,stopLam));
+                end
+                title(axP, titleStr,'FontSize',11);
+                drawnow;
+
+                % Reset checkbox so user can preview again after adjustments.
+                cbSrc.Value = false;
+            end
+        end
+
+        function ch = customBandChannel(~, cube, lam, startLam, stopLam, minVal, maxVal)
+            % Average the hypercube over the specified wavelength band and
+            % normalise each channel to [0,1].  If minVal == maxVal == 0
+            % the min/max are taken from the data automatically.
+            idx = lam >= min(startLam,stopLam) & lam <= max(startLam,stopLam);
+            if ~any(idx)
+                % No spectral points in range: return a black channel.
+                ch = zeros(size(cube,1), size(cube,2));
+                return
+            end
+            ch = mean(abs(cube(:,:,idx)), 3, 'omitnan');
+            if minVal == 0 && maxVal == 0
+                minVal = min(ch(:));
+                maxVal = max(ch(:));
+            end
+            if maxVal == minVal
+                ch = zeros(size(ch));
+            else
+                ch = (ch - minVal) / (maxVal - minVal);
+            end
+            ch = max(min(ch, 1), 0);
+        end
+
         function cubeOut = spatialBin(app, cube, binSize)
             binSize = round(binSize);
             if binSize <= 1
@@ -3348,5 +3581,245 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
                 cube = cube_real + 1i.*cube_imag;
             end
         end
+
+        function [cube,f,satMap,file_totCal,fr_real,Intens] = NPYHypercubeRead(filename)
+            % NPYHypercubeRead  Load a NumPy .npy file as a spectral hypercube.
+            %
+            % The .npy format stores a single N-dimensional array with a
+            % binary header that encodes dtype, shape, and memory order
+            % (C-contiguous row-major or Fortran-contiguous column-major).
+            % This reader parses the header manually — no Python or
+            % external toolbox is required.
+            %
+            % SHAPE CONVENTION
+            %   The loaded array must be 3-D.  If its shape is
+            %   (rows, cols, bands) it is used as-is (C order from Python
+            %   usually stores it this way when the array is created as
+            %   [y, x, lambda]).  The user is asked to confirm or swap
+            %   axes if the inferred shape seems transposed.
+            %
+            % OUTPUTS
+            %   cube        — double array [rows x cols x bands]
+            %   f           — spectral index 1:bands (no frequency axis
+            %                 is stored in .npy files)
+            %   satMap      — ones(rows,cols) (no saturation map)
+            %   file_totCal — [] (no calibration reference)
+            %   fr_real     — [] (no physical frequency axis)
+            %   Intens      — [] (computed later from cube)
+
+            satMap      = [];
+            file_totCal = [];
+            fr_real     = [];
+            Intens      = [];
+
+            fid = fopen(filename,'rb');
+            if fid < 0
+                error('Cannot open file: %s', filename);
+            end
+            cleanup = onCleanup(@() fclose(fid));
+
+            % --- Magic number and version ---
+            magic = fread(fid, 6, 'uint8')';
+            if ~isequal(magic, [147 78 85 77 80 89])  % \x93NUMPY
+                error('Not a valid .npy file (magic number mismatch): %s', filename);
+            end
+            verMajor = fread(fid, 1, 'uint8');
+            verMinor = fread(fid, 1, 'uint8'); %#ok<NASGU>
+
+            % --- Header length (2 bytes for v1.0, 4 bytes for v2.0+) ---
+            if verMajor >= 2
+                headerLen = fread(fid, 1, 'uint32', 0, 'ieee-le');
+            else
+                headerLen = fread(fid, 1, 'uint16', 0, 'ieee-le');
+            end
+
+            % --- Parse the ASCII header dictionary ---
+            headerStr = char(fread(fid, headerLen, 'char')');
+
+            % Extract 'descr' (dtype), 'fortran_order', and 'shape'.
+            descrMatch = regexp(headerStr, "'descr'\s*:\s*'([^']+)'", 'tokens','once');
+            if isempty(descrMatch)
+                error('Could not parse dtype from .npy header.');
+            end
+            descr = descrMatch{1};
+
+            fortranMatch = regexp(headerStr, "'fortran_order'\s*:\s*(True|False)", 'tokens','once');
+            fortranOrder = ~isempty(fortranMatch) && strcmp(fortranMatch{1},'True');
+
+            shapeMatch = regexp(headerStr, "'shape'\s*:\s*\(([^)]*)\)", 'tokens','once');
+            if isempty(shapeMatch)
+                error('Could not parse shape from .npy header.');
+            end
+            shapeParts = strsplit(strtrim(shapeMatch{1}), ',');
+            shapeParts = shapeParts(~cellfun(@(s) isempty(strtrim(s)), shapeParts));
+            shape = cellfun(@str2double, shapeParts);
+
+            if numel(shape) ~= 3
+                error(['.npy file has %d dimensions; expected a 3-D array ' ...
+                    '(rows x cols x bands).'], numel(shape));
+            end
+
+            % --- Map numpy dtype to MATLAB precision string ---
+            % Strip endian prefix (<, >, =, |) for matching.
+            endianChar = descr(1);
+            baseType   = descr(2:end);
+
+            if strcmp(endianChar,'>')
+                byteOrder = 'ieee-be';
+            else
+                byteOrder = 'ieee-le';  % '<', '=', or '|' all map to LE
+            end
+
+            switch baseType
+                case {'f2','f4'},  matlabType = 'single';  nBytes = str2double(baseType(2));
+                case 'f8',         matlabType = 'double';  nBytes = 8;
+                case {'i1','u1'},  matlabType = 'int8';    nBytes = 1;
+                case {'i2','u2'},  matlabType = 'int16';   nBytes = 2;
+                case {'i4','u4'},  matlabType = 'int32';   nBytes = 4;
+                case {'i8','u8'},  matlabType = 'int64';   nBytes = 8;
+                otherwise
+                    error('Unsupported .npy dtype: %s', descr);
+            end
+            % Unsigned types: re-read as unsigned
+            if baseType(1) == 'u'
+                matlabType = ['u' matlabType];  % e.g. 'uint16'
+            end
+
+            % --- Read raw data ---
+            nElems = prod(shape);
+            if nBytes == 1
+                rawData = fread(fid, nElems, matlabType);
+            else
+                rawData = fread(fid, nElems, [matlabType '=>' matlabType], 0, byteOrder);
+            end
+            rawData = double(rawData);
+
+            % --- Reshape according to memory order ---
+            % NumPy C order (row-major): shape = (d0, d1, d2), stored
+            % with d2 varying fastest.  In MATLAB (column-major) we must
+            % reshape as (d2, d1, d0) and then permute.
+            if fortranOrder
+                % Fortran order: shape dimensions directly match MATLAB
+                % column-major storage order.
+                cube = reshape(rawData, shape);
+            else
+                % C order: reverse the shape for reshape, then permute.
+                cube = reshape(rawData, fliplr(shape));
+                cube = permute(cube, ndims(cube):-1:1);
+            end
+            % cube is now (shape(1) x shape(2) x shape(3)).
+
+            f = 1:shape(3);
+        end
+        function [cube,f,satMap,file_totCal,fr_real,Intens] = NPZHypercubeRead(filename)
+            % NPZHypercubeRead  Load a NumPy .npz archive as a spectral hypercube.
+            %
+            % A .npz file is a ZIP archive of multiple .npy arrays (one
+            % per variable).  This reader extracts all arrays, then:
+            %   - Identifies the hypercube as the unique 3-D array.
+            %     If multiple 3-D arrays are present the user is asked
+            %     which one to use.
+            %   - Identifies fr_real as a 1-D array whose name contains
+            %     'fr_real' or 'freq' (case-insensitive).  If not found
+            %     by name, the user is asked to pick one from all 1-D
+            %     arrays, or skip.
+            %   - All other arrays (metadata) are ignored.
+
+            satMap      = [];
+            file_totCal = [];
+            fr_real     = [];
+            Intens      = [];
+
+            % Unzip to a temporary directory.
+            tmpDir = tempname();
+            mkdir(tmpDir);
+            cleanupTmp = onCleanup(@() rmdir(tmpDir,'s'));
+
+            try
+                unzip(filename, tmpDir);
+            catch ME
+                error('Could not unzip .npz file: %s', ME.message);
+            end
+
+            % Collect all .npy files in the archive.
+            npyFiles = dir(fullfile(tmpDir,'*.npy'));
+            if isempty(npyFiles)
+                error('No .npy arrays found inside %s.', filename);
+            end
+
+            % Load every array and record its name, data, and ndims.
+            arrays   = struct('name',{},'data',{},'ndim',{},'numel',{});
+            for k = 1:numel(npyFiles)
+                try
+                    [data,~,~,~,~,~] = HyperspectralAnalysisApp.NPYHypercubeRead( ...
+                        fullfile(tmpDir, npyFiles(k).name));
+                    [~,varName] = fileparts(npyFiles(k).name);
+                    arrays(end+1).name  = varName;  %#ok<AGROW>
+                    arrays(end).data    = data;
+                    arrays(end).ndim    = ndims(data);
+                    arrays(end).numel   = numel(data);
+                catch
+                    % Skip unreadable arrays silently.
+                end
+            end
+
+            if isempty(arrays)
+                error('Could not read any arrays from %s.', filename);
+            end
+
+            % --- Identify the hypercube (3-D array) ---
+            idx3D = find([arrays.ndim] == 3);
+            if isempty(idx3D)
+                error('No 3-D array found in %s. Cannot identify hypercube.', filename);
+            elseif numel(idx3D) == 1
+                cubeIdx = idx3D;
+            else
+                % Multiple 3-D arrays: ask the user.
+                names3D = {arrays(idx3D).name};
+                [sel, ok] = listdlg('PromptString','Select the hypercube array:', ...
+                    'SelectionMode','single','ListString',names3D, ...
+                    'ListSize',[300 150],'Name','Select hypercube');
+                if ~ok
+                    error('No hypercube selected.');
+                end
+                cubeIdx = idx3D(sel);
+            end
+            cube = arrays(cubeIdx).data;
+            f    = 1:size(cube,3);
+
+            % --- Identify fr_real (1-D array) ---
+            idx1D = find([arrays.ndim] == 2 & cellfun(@(d) min(size(d))==1, {arrays.data}));
+            % Among 1-D arrays, prefer one whose name matches 'fr_real' or 'freq'.
+            frIdx = [];
+            for k = idx1D
+                if ~isempty(regexpi(arrays(k).name,'fr_real|fr real|freq','once'))
+                    frIdx = k;
+                    break
+                end
+            end
+
+            if isempty(frIdx) && ~isempty(idx1D)
+                % No name match — ask the user to pick or skip.
+                names1D = [{' -- None (use spectral index) --'}, {arrays(idx1D).name}];
+                [sel, ok] = listdlg( ...
+                    'PromptString','Select the fr_real frequency vector (or None):', ...
+                    'SelectionMode','single','ListString',names1D, ...
+                    'ListSize',[340 160],'Name','Select fr_real');
+                if ok && sel > 1
+                    frIdx = idx1D(sel-1);
+                end
+            end
+
+            if ~isempty(frIdx)
+                fr_real = double(arrays(frIdx).data(:))';
+                % Validate length matches the spectral dimension of the cube.
+                if numel(fr_real) ~= size(cube,3)
+                    warning(['fr_real has %d elements but the cube has %d spectral points. ' ...
+                        'Ignoring fr_real.'], numel(fr_real), size(cube,3));
+                    fr_real = [];
+                end
+            end
+        end
+
     end
 end
