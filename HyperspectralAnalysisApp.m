@@ -109,6 +109,11 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
         AddROISpectrumButton
         PixelClickButton
         RemoveBKGButton
+        NormButtonGroup
+        NormAreaButton
+        NormMaxButton
+        NormWavelengthButton
+        NormWavelengthField
 
         % Maps tab
         MapsTab
@@ -193,6 +198,9 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
 
         currentLambda
         currentFrReal
+
+        normMode = 'area'     % 'area', 'max', or 'wavelength'
+        normWavelength = 0    % target wavelength for 'wavelength' mode
 
         x_lam, y_lam, z_lam, Energy_i
         calibratedRGBAvailable = false
@@ -282,9 +290,9 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
             app.NormSpectrumAxes = uiaxes(plotGrid);
             app.NormSpectrumAxes.Layout.Row = 2;
             app.NormSpectrumAxes.Layout.Column = 2;
-            title(app.NormSpectrumAxes,'Spectra normalised to the area');
+            title(app.NormSpectrumAxes,'Spectra normalised to area');
             xlabel(app.NormSpectrumAxes,'Wavelength [nm]');
-            ylabel(app.NormSpectrumAxes,'Intensity [norm.]');
+            ylabel(app.NormSpectrumAxes,'Intensity [norm. area]');
             hold(app.NormSpectrumAxes,'on');
             grid(app.NormSpectrumAxes,'on');
 
@@ -394,8 +402,8 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
 
         function createSpectraTab(app)
             app.SpectraTab = uitab(app.ControlTabGroup,'Title','Spectra');
-            g = uigridlayout(app.SpectraTab,[5 1]);
-            g.RowHeight = {36,36,36,36,'1x'};
+            g = uigridlayout(app.SpectraTab,[6 1]);
+            g.RowHeight = {36,36,36,36,110,'1x'};
 
             app.AddROISpectrumButton = uibutton(g,'push','Text','Spectrum from ROI');
             app.AddROISpectrumButton.Layout.Row = 1; app.AddROISpectrumButton.Layout.Column = 1;
@@ -412,6 +420,22 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
             app.CleanGraphsButton = uibutton(g,'push','Text','Clean graphs');
             app.CleanGraphsButton.Layout.Row = 4; app.CleanGraphsButton.Layout.Column = 1;
             app.CleanGraphsButton.ButtonPushedFcn = @(~,~) app.CleanGraphsButtonPushed();
+
+            % --- Normalisation mode panel ---
+            app.NormButtonGroup = uibuttongroup(g, ...
+                'Title','Normalisation (bottom-right plot)', ...
+                'SelectionChangedFcn',@(~,~) app.NormModeChanged());
+            app.NormButtonGroup.Layout.Row = 5; app.NormButtonGroup.Layout.Column = 1;
+
+            app.NormAreaButton = uiradiobutton(app.NormButtonGroup, ...
+                'Text','Area','Position',[8 62 80 22],'Value',true);
+            app.NormMaxButton = uiradiobutton(app.NormButtonGroup, ...
+                'Text','Maximum','Position',[8 38 80 22]);
+            app.NormWavelengthButton = uiradiobutton(app.NormButtonGroup, ...
+                'Text','Wavelength:','Position',[8 14 100 22]);
+            app.NormWavelengthField = uieditfield(app.NormButtonGroup,'numeric', ...
+                'Value',0,'Position',[110 14 90 22], ...
+                'Tooltip','Wavelength at which to normalise (nm / index)');
         end
 
         function createMapsTab(app)
@@ -821,6 +845,32 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
         function CleanGraphsButtonPushed(app, ~)
             app.clearSpectrumPlots();
             app.StatusLabel.Text = 'Graphs cleared.';
+        end
+
+        function NormModeChanged(app, ~)
+            % Update the normMode property when the user selects a
+            % different radio button.  The change takes effect on the
+            % next spectrum added; existing plots are not redrawn.
+            if app.NormAreaButton.Value
+                app.normMode = 'area';
+                title(app.NormSpectrumAxes,'Spectra normalised to area');
+                ylabel(app.NormSpectrumAxes,'Intensity [norm. area]');
+                app.StatusLabel.Text = 'Normalisation: area.';
+            elseif app.NormMaxButton.Value
+                app.normMode = 'max';
+                title(app.NormSpectrumAxes,'Spectra normalised to maximum');
+                ylabel(app.NormSpectrumAxes,'Intensity [norm. max]');
+                app.StatusLabel.Text = 'Normalisation: maximum.';
+            else
+                app.normMode = 'wavelength';
+                app.normWavelength = app.NormWavelengthField.Value;
+                title(app.NormSpectrumAxes, ...
+                    sprintf('Spectra normalised at %.4g %s', ...
+                    app.normWavelength, app.LabelX));
+                ylabel(app.NormSpectrumAxes,'Intensity [norm. at \lambda]');
+                app.StatusLabel.Text = sprintf('Normalisation: value at %.4g %s.', ...
+                    app.normWavelength, app.LabelX);
+            end
         end
 
         function CustomAxesButtonPushed(app, ~)
@@ -3037,9 +3087,7 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
             ylabel(app.SpectrumAxes,'Intensity [arb.un.]');
             xlabel(app.SpectrumAxes, app.LabelX);
 
-            title(app.NormSpectrumAxes,'Spectra normalised to the area');
-            ylabel(app.NormSpectrumAxes,'Intensity [norm.]');
-            xlabel(app.NormSpectrumAxes, app.LabelX);
+            app.updateNormAxesLabels();
 
             app.num_spectrum = 0;
             app.Spectrum_subAve = [];
@@ -3090,8 +3138,24 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
             title(app.SpectrumAxes,'Spectra for selected regions');
             ylabel(app.SpectrumAxes,'Intensity [arb.un.]');
             xlabel(app.SpectrumAxes, app.LabelX);
-            title(app.NormSpectrumAxes,'Spectra normalised to the area');
-            ylabel(app.NormSpectrumAxes,'Intensity [norm.]');
+            app.updateNormAxesLabels();
+        end
+
+        function updateNormAxesLabels(app)
+            % Set NormSpectrumAxes title and ylabel to match normMode.
+            switch app.normMode
+                case 'max'
+                    title(app.NormSpectrumAxes,'Spectra normalised to maximum');
+                    ylabel(app.NormSpectrumAxes,'Intensity [norm. max]');
+                case 'wavelength'
+                    title(app.NormSpectrumAxes, ...
+                        sprintf('Spectra normalised at %.4g %s', ...
+                        app.normWavelength, app.LabelX));
+                    ylabel(app.NormSpectrumAxes,'Intensity [norm. at \lambda]');
+                otherwise % 'area'
+                    title(app.NormSpectrumAxes,'Spectra normalised to area');
+                    ylabel(app.NormSpectrumAxes,'Intensity [norm. area]');
+            end
             xlabel(app.NormSpectrumAxes, app.LabelX);
         end
 
@@ -3112,11 +3176,22 @@ classdef HyperspectralAnalysisApp < matlab.apps.AppBase
             app.SpectrumPlotHandles(end+1) = hFill;
             app.SpectrumPlotHandles(end+1) = hLine;
 
-            areaNorm = trapz(y);
-            if areaNorm == 0
-                areaNorm = 1;
+            % Normalise the bottom-right plot according to the selected mode.
+            switch app.normMode
+                case 'max'
+                    normFactor = max(y);
+                    if normFactor == 0; normFactor = 1; end
+                case 'wavelength'
+                    app.normWavelength = app.NormWavelengthField.Value;
+                    [~, normIdx] = min(abs(x - app.normWavelength));
+                    normFactor = y(normIdx);
+                    if normFactor == 0; normFactor = 1; end
+                otherwise % 'area'
+                    normFactor = trapz(y);
+                    if normFactor == 0; normFactor = 1; end
             end
-            hNorm = plot(app.NormSpectrumAxes, x, y/areaNorm,'LineWidth',2,'Color',col);
+
+            hNorm = plot(app.NormSpectrumAxes, x, y/normFactor,'LineWidth',2,'Color',col);
             app.NormSpectrumPlotHandles(end+1) = hNorm;
 
             app.Spectrum_subAve(:,app.num_spectrum) = y;
